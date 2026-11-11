@@ -1,0 +1,15 @@
+Dragon Burner toolhead art in gui/js/art.js (the DB block) is traced from
+the official printed-parts CAD, not drawn by eye.
+
+Source: chirpy2605/voron
+  V0/Dragon_Burner/CAD/Dragon_Burner_v0.2_v8.step
+  commit a02fceadea974f728f80dacc2349508c0521a337 (2024-01-09)
+  https://github.com/chirpy2605/voron/tree/main/V0/Dragon_Burner
+
+That repository is licensed under the GNU General Public License v3.0.
+The full license text is LICENSE-AntHead.txt in this directory (the same
+GPL-3.0). The traced outlines are a derivative of the standard MainBody,
+the left and right Standard ducts, and the Voron logo diffuser in that STEP.
+
+The STEP file and the exported meshes are not stored in this repo (size).
+Rebuild with build_dragonburner.py, then export_db_art.py. See README.md.

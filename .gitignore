@@ -1,0 +1,16 @@
+# Python / Node / editors
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+.DS_Store
+*.swp
+
+# private or generated, never in the repo
+notes/
+gui/dev/screenshots/
+gui/dev/ref/cad/src/
+gui/dev/ref/*.jpg
+!gui/dev/ref/concept.jpg
+

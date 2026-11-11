@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StealthChanger | ktc-filament GUI</title>
+<link rel="icon" href="data:,">
+<!-- Release version. The page reads this tag from the web server to see if it is out of date;
+     the ?v= on every file makes a new release load fresh files (no Ctrl+F5). Keep all equal to
+     GUI_VERSION in js/app.js (tests check). The meta no-cache is a hint only: browsers follow the
+     server's Cache-Control (gui/install.sh sets no-cache), and the page reloads itself if stale. -->
+<meta name="ktc-gui-version" content="0.2.6">
+<meta http-equiv="Cache-Control" content="no-cache">
+<link rel="stylesheet" href="style.css?v=0.2.6">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">&#9650;</span> <span class="bname">StealthChanger</span> <small id="verTag" class="vertag" title="GUI version">v</small> <small id="printerName"></small></div>
+  <div class="chips">
+    <span id="connChip" class="chip" title="Moonraker websocket">connecting</span>
+    <span id="stateChip" class="chip" title="Klipper print_stats.state">-</span>
+    <span id="tcChip" class="chip" title="toolchanger.status">-</span>
+    <span id="modChips"></span>
+  </div>
+  <button id="btnSettings" class="icon" title="GUI settings: printer address, toolhead models and colours" aria-label="Settings">&#9881;</button>
+</header>
+<div id="banners"></div>
+<main id="main">
+  <section id="rack" class="rack" aria-label="Spools and toolheads"></section>
+  <section class="panel" id="controls">
+    <div class="panelhead">
+      <nav class="tabs" id="tabs" role="tablist"></nav>
+      <button class="icon collapse" id="btnCollapse" title="Collapse or expand the controls" aria-label="Collapse">&#9662;</button>
+    </div>
+    <div id="tabBody" class="tabbody"></div>
+  </section>
+</main>
+<footer class="console" id="console">
+  <div class="conhead">
+    <span>Console</span>
+    <form id="conForm" autocomplete="off">
+      <input id="conInput" type="text" placeholder="Send G-code, e.g. SHOW_TOOLS" title="Sends the line to Klipper like the Mainsail console">
+    </form>
+    <button class="icon" id="btnConClear" title="Clear the console view" aria-label="Clear">&#10005;</button>
+    <button class="icon" id="btnConToggle" title="Show or hide the console" aria-label="Toggle console">&#9652;</button>
+  </div>
+  <div id="conLines" class="conlines" aria-live="polite"></div>
+</footer>
+
+<dialog id="dlgEditor" class="dlg">
+  <form method="dialog" id="edForm" novalidate>
+    <h2 id="edTitle">Edit spool</h2>
+    <div class="edgrid">
+      <div class="edcol">
+        <label>Material
+          <select id="edMaterial" title="Filament material, saved as t#_material">
+            <option>PLA</option><option>PETG</option><option>ABS</option><option>ASA</option>
+            <option>TPU</option><option>PC</option><option>Nylon</option><option value="__other">Other...</option>
+          </select>
+        </label>
+        <label id="edOtherWrap" hidden>Other material
+          <input id="edOther" type="text" maxlength="20" placeholder="e.g. PA-CF" title="Free text, letters and numbers. Saved in upper case">
+        </label>
+        <label>Colour
+          <span class="row"><input id="edColor" type="color" title="Pick the filament colour (saved as t#_color, 6 hex digits)">
+          <input id="edHex" type="text" maxlength="7" placeholder="FF8800" title="6 hex digits, the hash is optional" class="hex"></span>
+        </label>
+        <div id="edSwatches" class="swatches" aria-label="Colour swatches"></div>
+        <label>Spool name
+          <input id="edSpool" type="text" maxlength="40" placeholder="e.g. Sunlu grey 1kg" title="Free text shown on the spool. # ; and quotes are removed">
+        </label>
+      </div>
+      <div class="edcol">
+        <div class="lbl" title="Which temperature this tool loads and unloads at">Temp profile</div>
+        <div class="seg" id="edProfile" role="radiogroup">
+          <button type="button" data-v="HIGH" title="Global HIGH temps from _FILAMENT_SETTINGS (ABS, ASA, PC)">HIGH</button>
+          <button type="button" data-v="LOW" title="Global LOW temps from _FILAMENT_SETTINGS (PLA, PETG)">LOW</button>
+          <button type="button" data-v="CUSTOM" title="Per-tool temps for odd filaments">CUSTOM</button>
+        </div>
+        <div id="edProfInfo" class="muted small"></div>
+        <div id="edCustom" class="row2">
+          <label>Load temp C<input id="edLoadT" type="number" step="1" placeholder="e.g. 230" title="CUSTOM load temperature"></label>
+          <label>Unload temp C<input id="edUnloadT" type="number" step="1" placeholder="e.g. 220" title="CUSTOM unload temperature"></label>
+        </div>
+        <div class="lbl">Motion for this tool <span class="muted small">(blank = global default)</span></div>
+        <div class="row2">
+          <label>Load length mm<input id="edLL" type="number" step="1" title="Sensor/gears to nozzle feed length"></label>
+          <label>Load speed mm/min<input id="edLS" type="number" step="10" title="Feed speed (F value)"></label>
+          <label>Unload length mm<input id="edUL" type="number" step="1" title="Total retract length on unload"></label>
+          <label>Unload speed mm/min<input id="edUS" type="number" step="10" title="Retract speed (F value)"></label>
+          <label>Nozzle change mm<input id="edPL" type="number" step="1" title="How far a nozzle change pulls back: clears the nozzle and heat break, stays in the gears"></label>
+        </div>
+      </div>
+    </div>
+    <div id="edErr" class="err"></div>
+    <pre id="edPreview" class="preview" title="The commands Save will send"></pre>
+    <div class="actions">
+      <button type="button" id="edCancel" class="btn" title="Close without saving">Cancel</button>
+      <button type="button" id="edSave" class="btn primary" title="Send the commands shown above">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgConfirm" class="dlg small">
+  <form method="dialog">
+    <h2 id="cfTitle">Are you sure?</h2>
+    <p id="cfText"></p>
+    <pre id="cfCmd" class="preview"></pre>
+    <div class="actions">
+      <button value="no" class="btn" id="cfNo">Cancel</button>
+      <button value="yes" class="btn danger" id="cfYes">Run</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgValue" class="dlg small">
+  <form method="dialog" id="valForm">
+    <h2 id="valTitle">Set</h2>
+    <label id="valLabel">Value<input id="valInput" type="number"></label>
+    <input id="valRange" type="range" min="0" max="100" step="1" hidden>
+    <div id="valErr" class="err"></div>
+    <div class="actions">
+      <button value="off" class="btn" id="valOff">Off</button>
+      <button value="no" class="btn" id="valNo">Cancel</button>
+      <button value="ok" class="btn primary" id="valOk">Set</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgSpool" class="dlg small">
+  <form method="dialog">
+    <h2 id="spTitle">Spool</h2>
+    <label>Filament<select id="spFil" title="Filament type in Spoolman, or create a new one"></select></label>
+    <div id="spNew" hidden>
+      <div class="spgrid">
+        <label>Brand<input id="spVendor" type="text" maxlength="40" placeholder="e.g. Overture"></label>
+        <label>Name<input id="spName" type="text" maxlength="60" placeholder="e.g. PETG Formula Blue"></label>
+        <label>Material<input id="spMat" type="text" maxlength="20" list="spMats" value="PLA"></label>
+        <label>Colour<span class="row"><input id="spColor" type="color" value="#ff8800"><input id="spHex" type="text" class="hex" maxlength="7" value="FF8800"></span></label>
+      </div>
+      <datalist id="spMats"><option>PLA</option><option>PETG</option><option>ABS</option><option>ASA</option><option>TPU</option><option>PC</option><option>NYLON</option></datalist>
+    </div>
+    <div class="spgrid">
+      <label>Remaining (g)<input id="spRem" type="number" min="0" step="1" title="Filament left on the spool, without the empty spool"></label>
+      <label>Full spool (g)<input id="spInit" type="number" min="1" step="1" title="Filament weight when new, usually 1000"></label>
+      <label>Location<input id="spLoc" type="text" maxlength="60" placeholder="e.g. Dry box"></label>
+      <label>Comment<input id="spComment" type="text" maxlength="200"></label>
+    </div>
+    <div id="spErr" class="err"></div>
+    <div class="actions">
+      <button value="no" class="btn">Cancel</button>
+      <button value="ok" class="btn primary" id="spSave">Save to Spoolman</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgSettings" class="dlg">
+  <form method="dialog">
+    <h2>GUI settings</h2>
+    <label>Moonraker address
+      <input id="setHost" type="text" placeholder="e.g. printer.local:7125 (blank = this page's host)" title="host:port of Moonraker. Saved in this browser only">
+    </label>
+    <div class="lbl">Toolheads <span class="muted small">(saved in the Moonraker database, namespace ktc_gui. Head and extruder change this drawing only, not the printer's motors.)</span></div>
+    <div id="setHeads" class="setheads"></div>
+    <div class="row">
+      <label>Body colour (all)<input id="setBodyAll" type="color" title="Apply this body colour to every toolhead"></label>
+      <label>Accent colour (all)<input id="setAccentAll" type="color" title="Apply this duct/accent colour to every toolhead"></label>
+      <button type="button" class="btn" id="setApplyAll" title="Copy these two colours to every position">Apply to all</button>
+    </div>
+    <p class="muted small">GUI v<span id="guiVersion"></span>. Prefs never touch printer.cfg.</p>
+    <p class="muted small" id="repoVersion"></p>
+    <div class="actions">
+      <button value="no" class="btn">Cancel</button>
+      <button value="ok" class="btn primary" id="setSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="js/rpc.js?v=0.2.6"></script>
+<script src="js/commands.js?v=0.2.6"></script>
+<script src="js/art.js?v=0.2.6"></script>
+<script src="js/app.js?v=0.2.6"></script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+Real Klipper: /workspace/klipper-src/klippy ee2c6fb 2026-10-21 14:14:39 -0400
+  ok  SHOW_TOOLS user variables.cfg: 7 console lines, 7 gcode lines
+        console| echo: ktc-filament v0.2.0 | 6 tools | active T-1 | HIGH 260/260C, LOW 240/240C (load/unload)
+        console| echo: T0 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder
+        console| echo: T1 | - -  | LOW | LOADED | sensor filament | load 60mm F300, unload 150mm F7200 | extruder1
+        console| echo: T2 | - -  | LOW | LOADED | sensor filament | load 60mm F300, unload 150mm F7200 | extruder2
+        console| echo: T3 | - -  | LOW | LOADED | sensor filament | load 60mm F300, unload 150mm F7200 | extruder3
+        console| echo: T4 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder4
+        console| echo: T5 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder5
+  ok  SHOW_TOOLS mixed: 7 console lines, 7 gcode lines
+        console| echo: ktc-filament v0.2.0 | 6 tools | active T-1 | HIGH 260/260C, LOW 240/240C (load/unload)
+        console| echo: T0 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder
+        console| echo: T1 | - -  | LOW | LOADED | sensor empty MISMATCH, marked loaded | load 60mm F300, unload 150mm F7200 | extruder1
+        console| echo: T2 | - -  | CUSTOM 225C/HIGH | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder2
+        console| echo: T3 | PLA FF0000  | LOW | empty | sensor filament_sensor_T3 NOT FOUND | load 60mm F300, unload 150mm F7200 | extruder3
+        console| echo: T4 | - -  | LOW | empty | sensor filament_sensor_T4 NOT FOUND | load 90mm F300, unload 150mm F7200 (custom) | extruder4
+        console| echo: T5 | - -  | LOW | empty | sensor filament_sensor_T5 NOT FOUND | load 60mm F300, unload 150mm F7200 | extruder5
+  ok  load T3 docked, LOW default: 5 console lines, 19 gcode lines
+  ok  unload T1 HIGH via old t1_temp_type key: 5 console lines, 20 gcode lines
+  ok  unload keeps hotter print target 275: 6 console lines, 21 gcode lines
+  ok  load refused while printing: refused ->  'gcode_macro FILAMENT_LOAD:gcode': gcode.CommandError: FILAMENT_LOAD T2: refused while printing. Pause first.
+  ok  load refused, already loaded: refused -> T2: already marked loaded. Unload first, fix the flag with SET_FILAMENT_LOADED TOOL=2 LOADED=0, or add FORCE=1
+  ok  load FORCE when loaded: 5 console lines, 19 gcode lines
+  ok  load refused, sensor empty: refused -> mmandError: FILAMENT_LOAD T4: the filament sensor reads empty. Insert filament up to the gears, or add FORCE=1
+  ok  load unknown tool: refused -> ro FILAMENT_LOAD:gcode': gcode.CommandError: FILAMENT_LOAD: there is no tool T9. Known tools: 0, 1, 2, 3, 4, 5
+  ok  load missing TOOL: refused -> de_macro FILAMENT_LOAD:gcode': gcode.CommandError: FILAMENT_LOAD: TOOL= is required, e.g. FILAMENT_LOAD TOOL=0
+  ok  load lower-case command + param: 5 console lines, 19 gcode lines
+  ok  CUSTOM missing -> HIGH warn: 6 console lines, 20 gcode lines
+  ok  CUSTOM 225 + per-tool motion: 5 console lines, 21 gcode lines
+  ok  reset motion (None) falls back: 5 console lines, 19 gcode lines
+  ok  2 tools [0,7], no sensors, load T7: 5 console lines, 19 gcode lines
+  ok  motion-sensor kind empty refuses: refused -> mmandError: FILAMENT_LOAD T1: the filament sensor reads empty. Insert filament up to the gears, or add FORCE=1
+  ok  unload with max_extrude_only_distance 50: 6 console lines, 22 gcode lines
+  ok  load while T2 active: 5 console lines, 19 gcode lines
+  ok  partial T2 default 35mm, LOW unload temp, heater off: 4 console lines, 20 gcode lines
+  ok  partial LENGTH=40: 4 console lines, 20 gcode lines
+  ok  partial per-tool PARTIAL_LENGTH 30 + HIGH profile: 4 console lines, 20 gcode lines
+  ok  partial LENGTH= beats per-tool: 4 console lines, 20 gcode lines
+  ok  partial LENGTH=55 rejected (load 60 - margin 10): refused -> It must be 5 to 50.0mm, the load length 60.0mm minus partial_margin 10.0mm, so the filament stays in the gears
+  ok  partial LENGTH=2 rejected: refused -> It must be 5 to 50.0mm, the load length 60.0mm minus partial_margin 10.0mm, so the filament stays in the gears
+  ok  partial LENGTH=100 ok with load_length 160: 4 console lines, 21 gcode lines
+  ok  partial refused while printing: refused -> ed while the printer is printing. A nozzle change needs new tool offsets, so finish or cancel the print first.
+  ok  partial refused while paused: refused -> used while the printer is paused. A nozzle change needs new tool offsets, so finish or cancel the print first.
+  ok  partial refused when already partial: refused -> y unloaded, 35.0mm out. Run FILAMENT_LOAD TOOL=2 to feed it back, or FILAMENT_UNLOAD TOOL=2 to take it all out
+  ok  partial refused, sensor empty: refused -> NLOAD_PARTIAL T2: the filament sensor reads empty, there is nothing to pull back. Add FORCE=1 to run it anyway
+  ok  partial FORCE=1 with sensor empty: 4 console lines, 20 gcode lines
+  ok  partial refused, no sensor and marked empty: refused -> _PARTIAL T2: the tool is marked empty. Mark it loaded with SET_FILAMENT_LOADED TOOL=2 LOADED=1, or add FORCE=1
+  ok  partial no sensor, marked loaded: 4 console lines, 20 gcode lines
+  ok  partial unknown tool: refused -> ARTIAL:gcode': gcode.CommandError: FILAMENT_UNLOAD_PARTIAL: there is no tool T9. Known tools: 0, 1, 2, 3, 4, 5
+  ok  partial missing TOOL: refused -> AL:gcode': gcode.CommandError: FILAMENT_UNLOAD_PARTIAL: TOOL= is required, e.g. FILAMENT_UNLOAD_PARTIAL TOOL=0
+  ok  partial while T2 active restores T2: 4 console lines, 20 gcode lines
+  ok  load after partial feeds 35 + purge 25, clears partial: 5 console lines, 21 gcode lines
+  ok  unload after partial retracts 150 - 35 = 115: 6 console lines, 22 gcode lines
+  ok  unload after partial, nothing left (unload_length 30): 6 console lines, 20 gcode lines
+  ok  sequence partial -> full unload = normal unload total: 10 console lines, 42 gcode lines
+  ok  sequence partial -> load = back where it was + purge: 9 console lines, 41 gcode lines
+  ok  SET_FILAMENT_LOADED clears partial: 1 console lines, 4 gcode lines
+  ok  SHOW_TOOLS partial: 7 console lines, 7 gcode lines
+        console| echo: ktc-filament v0.2.0 | 6 tools | active T-1 | HIGH 260/260C, LOW 240/240C (load/unload)
+        console| echo: T0 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder
+        console| echo: T1 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder1
+        console| echo: T2 | - -  | LOW | PARTIAL nozzle change, 35.0mm out | sensor filament | load 60mm F300, unload 150mm F7200 | extruder2
+        console| echo: T3 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder3
+        console| echo: T4 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder4
+        console| echo: T5 | - -  | LOW | empty | sensor filament | load 60mm F300, unload 150mm F7200 | extruder5
+  ok  SHOW_TOOLS partial, sensor empty: 7 console lines, 7 gcode lines
+        console| echo: ktc-filament v0.2.0 | 6 tools | active T-1 | HIGH 260/260C, LOW 240/240C (load/unload)
+        console| echo: T0 | - -  | LOW | empty | sensor filament_sensor_T0 NOT FOUND | load 60mm F300, unload 150mm F7200 | extruder
+        console| echo: T1 | - -  | LOW | empty | sensor filament_sensor_T1 NOT FOUND | load 60mm F300, unload 150mm F7200 | extruder1
+        console| echo: T2 | - -  | LOW | PARTIAL nozzle change, 35.0mm out | sensor empty MISMATCH, marked partial | load 60mm F300, unload 150mm F7200 | extruder2
+        console| echo: T3 | - -  | LOW | empty | sensor filament_sensor_T3 NOT FOUND | load 60mm F300, unload 150mm F7200 | extruder3
+        console| echo: T4 | - -  | LOW | empty | sensor filament_sensor_T4 NOT FOUND | load 60mm F300, unload 150mm F7200 | extruder4
+        console| echo: T5 | - -  | LOW | empty | sensor filament_sensor_T5 NOT FOUND | load 60mm F300, unload 150mm F7200 | extruder5
+  ok  SET_FILAMENT_MOTION PARTIAL_LENGTH=30: 1 console lines, 2 gcode lines
+  ok  SET_FILAMENT_MOTION RESET clears PARTIAL_LENGTH: 1 console lines, 2 gcode lines
+  ok  button: partial + sensor filament -> LOAD back: 7 console lines, 26 gcode lines
+  ok  button: partial, no sensor -> LOAD back: 7 console lines, 26 gcode lines
+  ok  button: partial + sensor empty -> nothing: 2 console lines, 2 gcode lines
+  ok  button: partial while printing -> ignored: 2 console lines, 2 gcode lines
+  ok  SET_FILAMENT_TEMP HIGH: 1 console lines, 2 gcode lines
+  ok  SET_FILAMENT_TEMP CUSTOM TEMP=225: 1 console lines, 4 gcode lines
+  ok  SET_FILAMENT_TEMP CUSTOM load only -> warn: 2 console lines, 4 gcode lines
+  ok  SET_FILAMENT_TEMP CUSTOM 300 rejected: refused -> gcode': gcode.CommandError: SET_FILAMENT_TEMP T2: custom load temp 300C rejected, extruder2 allows 170 to 290C
+  ok  SET_FILAMENT_TEMP CUSTOM 150 rejected: refused -> ode': gcode.CommandError: SET_FILAMENT_TEMP T2: custom unload temp 150C rejected, extruder2 allows 170 to 290C
+  ok  SET_FILAMENT_TEMP bad type: refused -> s sets the temperature profile, not the material. Set the material with SET_TOOL_FILAMENT TOOL=n MATERIAL=PETG
+  ok  SET_FILAMENT_MOTION set: 1 console lines, 3 gcode lines
+  ok  SET_FILAMENT_MOTION reset: 1 console lines, 2 gcode lines
+  ok  SET_FILAMENT_MOTION out of range: refused -> ET_FILAMENT_MOTION:gcode': gcode.CommandError: SET_FILAMENT_MOTION T1: LOAD_LENGTH=0 is out of range 1 to 2000
+  ok  SET_FILAMENT_MOTION show: 1 console lines, 1 gcode lines
+  ok  SET_FILAMENT_LOADED: 1 console lines, 2 gcode lines
+  ok  SET_TOOL_FILAMENT: 4 console lines, 11 gcode lines
+  ok  SET_TOOL_FILAMENT PROFILE=PETG refused, nothing saved: refused -> M or a temperature like 240, got 'PETG'. Nothing was saved. The material name (PLA, PETG...) goes in MATERIAL.
+  ok  SET_TOOL_FILAMENT PROFILE=245 -> CUSTOM 245: 2 console lines, 7 gcode lines
+  ok  SET_TOOL_FILAMENT material only (Mainsail form, other fields blank): 1 console lines, 2 gcode lines
+  ok  SET_TOOL_FILAMENT spool with double quotes: 1 console lines, 4 gcode lines
+  ok  SET_TOOL_FILAMENT bad colour: refused -> L_FILAMENT:gcode': gcode.CommandError: SET_TOOL_FILAMENT T3: COLOR must be 6 hex digits like FF0000, got 'red'
+  ok  SET_TOOL_FILAMENT COLOR=#FF0000 (Klipper cuts at #): refused -> OR is empty. Type it without the hash sign, e.g. COLOR=FF0000 (Klipper reads a hash as the start of a comment)
+  ok  SET_TOOL_FILAMENT SPOOL with ; in quotes: 1 console lines, 4 gcode lines
+  ok  SET_TOOL_FILAMENT CLEAR: 1 console lines, 2 gcode lines
+  ok  button: printing active, tangle off (default) -> ignore: 2 console lines, 2 gcode lines
+  ok  button: printing active, ORBITER_TANGLE MODE=PAUSE -> PAUSE: 2 console lines, 6 gcode lines
+  ok  button: printing active, ORBITER_TANGLE MODE=WARN -> warn only: 2 console lines, 4 gcode lines
+  ok  ORBITER_TANGLE bad mode: refused -> uating 'gcode_macro ORBITER_TANGLE:gcode': gcode.CommandError: ORBITER_TANGLE: MODE must be PAUSE, WARN or OFF
+  ok  ORBITER_TANGLE no args shows mode: 1 console lines, 1 gcode lines
+  ok  button: printing docked -> ignore: 2 console lines, 2 gcode lines
+  ok  button: paused -> ignore: 2 console lines, 2 gcode lines
+  ok  button: loaded -> unload: 7 console lines, 25 gcode lines
+  ok  button: empty + filament -> load: 7 console lines, 24 gcode lines
+  ok  button: empty + no filament -> nothing: 2 console lines, 2 gcode lines
+  ok  button: no sensor -> load: 7 console lines, 24 gcode lines
+  ok  button: double press inside lockout: 2 console lines, 2 gcode lines
+  ok  button: second real press right after a load: 2 console lines, 2 gcode lines
+  ok  _ORBITER_PRESS_DONE: 0 console lines, 1 gcode lines
+  ok  button without core module: refused -> ORBITER_BUTTON:gcode': gcode.CommandError: Orbiter add-on: the core module filament_macros.cfg is not included
+  ok  button for a tool that does not exist: refused -> Error evaluating 'gcode_macro _ORBITER_BUTTON:gcode': gcode.CommandError: Orbiter button: there is no tool T5
+  ok  _FILAMENT_SETTINGS (startup notice): 1 console lines, 1 gcode lines
+  ok  _ORBITER_SETTINGS (startup notice): 1 console lines, 1 gcode lines
+  ok  usage: SHOW_TOOL_USAGE
+  ok  usage: RESET_TOOL_USAGE TOOL=1
+  ok  usage: RESET_TOOL_USAGE TOOL=9
+  ok  usage: KTC_USAGE_MODE MODE=SPOOLMAN
+  ok  usage: SET_TOOL_SPOOL TOOL=2 ID=8 on the active tool
+  ok  usage: SET_TOOL_SPOOL TOOL=4 ID=0 clears
+  ok  usage: SET_TOOL_SPOOL missing ID
+  ok  usage: KTC_USAGE_MODE bad
+  ok  usage: KTC_USAGE_MODE show
+  ok  usage: KTC_TOOL_SYNC from a T# macro with no Spoolman
+  ok  usage: SET_TOOL_FILAMENT new SPOOL resets usage
+  ok  usage: SET_TOOL_FILAMENT same SPOOL keeps usage
+  ok  _USAGE_SETTINGS (notice): 1 console lines, 1 gcode lines
+  ok  usage add-on absent: filament still works: 1 console lines, 2 gcode lines
+  ok  Mainsail form FILAMENT_LOAD: TOOL [tool number, e.g. 0], FORCE [1 = skip loaded and sensor checks]
+  ok  Mainsail form FILAMENT_UNLOAD: TOOL [tool number, e.g. 0]
+  ok  Mainsail form FILAMENT_UNLOAD_PARTIAL: TOOL [tool number, e.g. 0], LENGTH [mm to pull back, blank = saved or default], FORCE [1 = skip the empty check]
+  ok  Mainsail form SET_FILAMENT_LOADED: TOOL [tool number, e.g. 0], LOADED [1 = loaded, 0 = empty]
+  ok  Mainsail form SET_FILAMENT_TEMP: TOOL [tool number, e.g. 0], TYPE [HIGH, LOW or CUSTOM], TEMP [CUSTOM load and unload C, e.g. 225], LOAD_TEMP [CUSTOM load C, e.g. 230], UNLOAD_TEMP [CUSTOM unload C, e.g. 220]
+  ok  Mainsail form SET_FILAMENT_MOTION: TOOL [tool number, e.g. 0], LOAD_LENGTH [mm, e.g. 60], LOAD_SPEED [mm/min, e.g. 300], UNLOAD_LENGTH [mm, e.g. 150], UNLOAD_SPEED [mm/min, e.g. 7200], PARTIAL_LENGTH [nozzle change pull-back mm, e.g. 35], RESET [1 = back to defaults]
+  ok  Mainsail form SET_TOOL_FILAMENT: TOOL [tool number, e.g. 0], MATERIAL [PLA, PETG, ABS, ASA...], COLOR [6 hex digits, no hash, e.g. FF8800], SPOOL [spool name, e.g. Sunlu grey 1kg], PROFILE [HIGH, LOW, CUSTOM or a temp like 240], CLEAR [1 = clear material, colour, spool]
+  ok  Mainsail form SHOW_TOOLS: no fields
+  ok  Mainsail form SPOOL_SETUP: TOOL [blank = pick it in the pop-up]
+  ok  Mainsail form ORBITER_TANGLE: MODE [PAUSE, WARN or OFF]
+  ok  Mainsail form KTC_TOOL_SYNC: FLUSH [1 = save the counter now]
+  ok  Mainsail form KTC_USAGE_MODE: MODE [LOCAL or SPOOLMAN]
+  ok  Mainsail form SET_TOOL_SPOOL: TOOL [tool number, e.g. 0], ID [Spoolman spool id, 0 = none]
+  ok  Mainsail form RESET_TOOL_USAGE: TOOL [tool number, e.g. 0], QUIET [1 = no console message]
+  ok  Mainsail form SHOW_TOOL_USAGE: no fields
+  ok  HELP lists 15 ktc-filament macros with examples
+  ok  Mainsail form SET_TOOL_FILAMENT, only TOOL + MATERIAL filled: 1 console lines, 2 gcode lines
+  ok  Mainsail form SET_FILAMENT_TEMP, TOOL + TYPE only: 1 console lines, 2 gcode lines
+  ok  Mainsail form FILAMENT_LOAD, FORCE blank still checks loaded: refused -> T2: already marked loaded. Unload first, fix the flag with SET_FILAMENT_LOADED TOOL=2 LOADED=0, or add FORCE=1
+  ok  Mainsail form SET_FILAMENT_MOTION, TOOL only shows values: 1 console lines, 1 gcode lines
+  ok  Mainsail form ORBITER_TANGLE, MODE blank shows mode: 1 console lines, 1 gcode lines
+  ok  SPOOL_SETUP step 1 tool: "Spool setup, step 1 of 4: tool", 6 buttons, footer Cancel
+  ok  SPOOL_SETUP click T1: "Spool setup T1, step 2 of 4: material", 8 buttons, footer Cancel/Back
+  ok  SPOOL_SETUP click PETG: "Spool setup T1, step 3 of 4: colour", 13 buttons, footer Cancel/Back
+  ok  SPOOL_SETUP click Orange: "Spool setup T1, step 4 of 4: temp profile", 4 buttons, footer Cancel/Back
+  ok  SPOOL_SETUP click HIGH: "Spool setup T1: done", 1 buttons, footer Back/Done
+  ok  SPOOL_SETUP TOOL=4 skips tool step: "Spool setup T4, step 2 of 4: material", 8 buttons, footer Cancel/Back
+  ok  SPOOL_SETUP Back: "Spool setup, step 1 of 4: tool", 6 buttons, footer Cancel
+  ok  SPOOL_SETUP T4 again: "Spool setup T4, step 2 of 4: material", 8 buttons, footer Cancel/Back
+  ok  SPOOL_SETUP material skipped: "Spool setup T4, step 3 of 4: colour", 13 buttons, footer Cancel/Back
+  ok  SPOOL_SETUP colour skipped: "Spool setup T4, step 4 of 4: temp profile", 4 buttons, footer Cancel/Back
+  ok  SPOOL_SETUP click CUSTOM: "Spool setup T4: done", 1 buttons, footer Back/Done
+  ok  SPOOL_SETUP ABS suggests HIGH: 18 console lines, 19 gcode lines
+  ok  SPOOL_SETUP profile step for ABS: 14 console lines, 14 gcode lines
+  ok  SPOOL_SETUP on 2 tools [0, 7]: 8 console lines, 9 gcode lines
+
+126 scenarios run through real Klipper code
+ALL CHECKS PASSED

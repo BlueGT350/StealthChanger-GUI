@@ -1,0 +1,16 @@
+Stealthburner toolhead art in gui/js/art.js (the SB block) is traced from
+the official assembly, not drawn by eye.
+
+Source: VoronDesign/Voron-Stealthburner
+  CAD/Stealthburner_CW2_Assembly.step
+  commit 75a2ab079c5aa3a0b6fbb0957de764ce13879da3 (2023-09-07)
+  https://github.com/VoronDesign/Voron-Stealthburner
+
+That repository is licensed under the GNU General Public License v3.0.
+The full license text is LICENSE-AntHead.txt in this directory (the same
+GPL-3.0). The traced outlines are a derivative of that CAD: the cowl,
+Clockwork 2 extruder, 4010 hotend fan opening, Revo Voron hotend, and the
+Voron logo diffuser.
+
+The STEP file and the exported meshes are not stored in this repo (size).
+Rebuild with build_stealthburner.py, then export_sb_art.py. See README.md.

@@ -1,0 +1,35 @@
+# GUI fix list (batch update)
+1. Calibrate one tool offset: auto-home (G28) first if X/Y/Z aren't all homed. Currently fails with "Cannot perform toolchange, axis not homed. Required: xyz". Check the other buttons that need homing too (calibrate all, park, pick up, test docking, calibration switch moves).
+2. SAVE_CONFIG fails "section 'tool T1' option 'gcode_x_offset' conflicts with included value" when tool cfg files hard-code offsets. GUI should detect (configfile.config vs save_config_pending / include) and explain the fix (comment out gcode_*_offset in T#.cfg) before saving. Also add to installer/readme notes for shared repo. Also check [tool_probe T#] z_offset (same conflict when probe Z offset is saved).
+3. (Parked, roadmap phase 7, not part of the batch fix): publish as a public GitHub repo with a one-line install script and a Moonraker update_manager entry (phase 7). User to create the repo or approve creating it.
+4. Stealthburner and Dragon Burner head models need rework: trace from official CAD/real profiles at true scale (like the Anthead), detailed and shaded, no crude shapes.
+5. Split head and extruder: separate Head and Extruder selections per tool. Heads: Anthead, Dragon Burner, Stealthburner (built-in Clockwork, extruder picker disabled). Extruders drawn on a common mount point atop the head: Orbiter 2.5, WW-BMG Wristwatch (only these two for now; more heads/extruders later). Trace all from real CAD, true scale. Replaces separate "Anthead + Wristwatch" model.
+6. (Deferred, with Mainsail page work) Do both: .theme/navi.json sidebar link for browser Mainsail, and an Orca Slicer second physical printer pointed at <printer>:8090 so the GUI shows in the Orca Device tab (test first). Mainsail fork stays an option for later.
+7. Active printing head shows "ready to load": status uses the t#_loaded flag (save_variables), which is unset/False when filament was loaded outside our macros (variables.cfg had no t0_loaded). Fix: if the tool is active and printing (or has extruded), show loaded/printing; optionally auto-set t#_loaded=True on tool select during a print, or offer a one-tap "Mark loaded".
+8. BUG: Mark loaded / Mark empty buttons send SET_TOOL_FILAMENT TOOL=n LOADED=1/0, which ignores LOADED. Must call SET_FILAMENT_LOADED TOOL=n LOADED=1/0 (and gate on that macro existing). Audit all other button commands against real macro names/params.
+9. Filament usage tracking with a setting: "Local" (our per-tool counter from extruder position, saved via save_variables, reset on spool change) or "Spoolman" (active spool per tool via Moonraker). Spoolman option only enabled when Moonraker reports Spoolman; default Local otherwise. Teaser post says Spoolman is on the roadmap.
+10. (Later feature, not this batch) MCU firmware update button: small helper service on the Pi (outside Klipper) runs the user's own flash script, streams output to GUI console, locked while printing, narrow passwordless sudo for klipper stop/start, stop+report on a failed flash, always restart Klipper. Goal: no command line ever. GUI firmware page: auto-list boards from /dev/serial/by-id (tick to flash), per-board-type build settings form (chip, clock, USB/CAN, bootloader offset) saved as config.<TYPE> files (replaces make menuconfig), build + flash with live output, advanced option for raw .config.
+11. Mobile: header stacks too tall on phones (iPhone 16 Pro Max portrait), pushing content far down. Compact the header on narrow screens (single row, smaller chips, collapse status into a menu). 2 tools side by side works on 16 Pro Max; check smaller phones (~375px) too.
+12. Spool hover halo invisible on dark filament colours (black) against the dark background. Keep the halo in the spool colour, but enforce a minimum contrast vs the background: lighten the halo colour (same hue) until it meets a contrast threshold (e.g. WCAG ~3:1); near-black/grey spools fall back to a light neutral glow.
+
+13. Spoolman inside the GUI: talk to Spoolman's API directly (via Moonraker's spoolman proxy) so assigning spools per tool, viewing remaining weight, and adding/editing spools all happen in-page. Mainsail's Spoolman link opens an external tab, which Orca's Device tab pushes to the system browser. Each tool change sets the active spool (SET_ACTIVE_SPOOL / Moonraker spoolman API) so usage lands on the right roll.
+14. Tool change animation jumps/snaps when the change finishes. Let the current cycle finish, then ease smoothly into the final resting state (no hard cut when the status flips).
+
+---
+## Status after rev 2 (GUI 0.2.2, modules 0.2.0)
+| # | Status | What was done |
+|---|---|---|
+| 1 | Done | Calibrate one / all, park, pick up (head click and Tool actions), test docking, move over sensor, align start and nozzle probe offset run `G28` first when X, Y or Z isn't homed. The confirm says so. When already homed, nothing extra is sent. |
+| 2 | Done | The GUI reads the config files (printer.cfg plus every include) and lists each `[tool T#] gcode_x/y/z_offset` and `[tool_probe T#] z_offset` that is set in an included file while the same value is in the `#*#` block or waiting to be saved. The list shows on Calibration > Save, a header banner warns, and SAVE_CONFIG asks first. If Klipper still rejects it, the error is explained in the GUI. The fix is in the README. |
+| 3 | Deferred | Public repo / update_manager (phase 7). |
+| 4 | Done | Stealthburner is traced from the Voron CW2 assembly. Dragon Burner is traced from the v8 cowl, standard ducts and Voron diffuser (v0.2.5). |
+| 5 | Done | Each tool has its own Head and Extruder (v0.2.6). Anthead and Dragon Burner take Orbiter 2.5 or WW-BMG Wristwatch. Stealthburner stays Clockwork 2 and the extruder selector is disabled. A saved head with no extruder stays Orbiter 2.5, so existing Anthead colours are unchanged. |
+| 6 | Deferred | Mainsail sidebar link + Orca device tab. |
+| 7 | Done | The tool that is printing counts as loaded ("printing"). The usage add-on also saves `t#_loaded = True` once a tool has extruded 5 mm in a print. |
+| 8 | Done | Mark loaded / Mark empty send `SET_FILAMENT_LOADED TOOL=n LOADED=1/0`. Every button command was checked against the real macros (see README, *Command audit*). |
+| 9 | Done | Filament tab > Filament usage: Local or Spoolman. Spoolman can only be picked when Moonraker reports Spoolman. Local counts per tool in variables.cfg (save_variables). |
+| 10 | Deferred | MCU firmware update page. |
+| 11 | Done | One-row header on phones (tested at 430 and 375 px). Module chips that are OK are hidden on phones, the connection chip becomes a dot under 400 px, and the filament table drops the Temps column. |
+| 12 | Done | The halo keeps the spool's hue, lightened until it is at least 3:1 against the rack. Black, grey and near-black spools get a soft light-grey glow. |
+| 13 | Done | Spoolman panel in the GUI (through Moonraker's proxy): spool list, assign a spool per tool, add and edit spools. The usage add-on sets the active spool after each tool change. |
+| 14 | Done | When the change finishes, the head finishes its current lift cycle, then eases into its resting place. No snap. |

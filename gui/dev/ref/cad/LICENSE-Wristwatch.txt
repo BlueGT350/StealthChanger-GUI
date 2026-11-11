@@ -1,0 +1,16 @@
+WW-BMG Wristwatch extruder art in gui/js/art.js (the WW block) is traced from
+the official CAD, not drawn by eye.
+
+Source: bythorsthunder/Voron_Mods
+  Wristwatch_Extruder_BMG/CAD/Wristwatch BMG v3.step
+  commit 359b95fb7263 (2024-05-23)
+  https://github.com/bythorsthunder/Voron_Mods
+
+That repository is licensed under the GNU General Public License v3.0.
+The full license text is LICENSE-AntHead.txt in this directory (the same
+GPL-3.0). The traced outlines are a derivative of the assembled main body,
+the motor plate that sits with it, the tension arm, and the BMG gears.
+The Sherpa-spacing adapter in the same STEP is not used.
+
+The STEP file and the exported meshes are not stored in this repo (size).
+Rebuild with build_wristwatch.py, then export_ww_art.py. See README.md.
