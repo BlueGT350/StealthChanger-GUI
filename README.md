@@ -1,15 +1,10 @@
 # StealthChanger GUI
 
-A web GUI for StealthChanger toolchangers running
-[KTC-Easy](https://github.com/jwellman80/klipper-toolchanger-easy) on Klipper,
-Moonraker and Mainsail.
-
-It shows a rack view of your tools and spools, and ships filament load/unload
-macros plus an optional Orbiter 2.5 button/sensor add-on and a filament-usage
-add-on (local counts or Spoolman). The GUI auto-detects which modules are
-installed.
+The StealthChanger GUI is a web page for a Voron toolchanger that already runs KTC-Easy, Klipper, Moonraker, and Mainsail.
 
 Current release: **v0.2.8**.
+
+**Docs:** <https://bluegt350.github.io/StealthChanger-GUI/>.
 
 ## Install (on the printer's Pi)
 

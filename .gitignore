@@ -9,6 +9,10 @@ node_modules/
 
 # private or generated, never in the repo
 notes/
+docs/.sass-cache/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+docs/.bundle/
 gui/dev/screenshots/
 gui/dev/ref/cad/src/
 gui/dev/ref/*.jpg

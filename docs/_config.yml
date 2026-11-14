@@ -1,0 +1,39 @@
+# GitHub Pages builds this folder as the site root when the public repo
+# https://github.com/BlueGT350/StealthChanger-GUI is published from /docs.
+# Project-site address: https://bluegt350.github.io/StealthChanger-GUI/
+title: StealthChanger GUI
+description: Install and use the StealthChanger GUI on a Voron with KTC-Easy, Klipper, Moonraker, and Mainsail.
+lang: en
+
+remote_theme: just-the-docs/just-the-docs@v0.12.0
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+enable_copy_code_button: true
+
+url: "https://bluegt350.github.io"
+baseurl: "/StealthChanger-GUI"
+
+aux_links:
+  "GitHub":
+    - "https://github.com/BlueGT350/StealthChanger-GUI"
+aux_links_new_tab: true
+
+footer_content: "StealthChanger GUI. Paths and commands on these pages match the files in the repository."
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-include-cache
+  - jekyll-seo-tag
+  - jekyll-relative-links
+
+exclude:
+  - SCREENSHOTS_TODO.md
+  - vendor
+  - Gemfile
+  - Gemfile.lock
+  - .sass-cache
+  - .jekyll-cache
+  - .jekyll-metadata
+
+permalink: /:basename:output_ext
