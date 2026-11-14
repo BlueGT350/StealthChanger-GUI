@@ -662,8 +662,8 @@ class Sim:
         # what Moonraker's git_repo updater reports (synthetic hashes)
         return {'name': 'stealthchanger-gui', 'configured_type': 'git_repo', 'detected_type': 'git_repo',
                 'channel': 'stable', 'branch': 'main', 'remote_alias': 'origin', 'owner': '?',
-                'repo_name': 'StealthChanger-GUI', 'version': 'v0.2.6', 'remote_version': 'v0.2.6',
-                'rollback_version': 'v0.2.5', 'full_version_string': 'v0.2.6-0-g0123abcd',
+                'repo_name': 'StealthChanger-GUI', 'version': 'v0.2.8', 'remote_version': 'v0.2.8',
+                'rollback_version': 'v0.2.6', 'full_version_string': 'v0.2.8-0-g0123abcd',
                 'current_hash': '0123abcd0123abcd0123abcd0123abcd0123abcd',
                 'remote_hash': '0123abcd0123abcd0123abcd0123abcd0123abcd',
                 'is_dirty': False, 'detached': False, 'commits_behind': [], 'commits_behind_count': 0,

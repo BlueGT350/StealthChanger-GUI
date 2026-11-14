@@ -1,4 +1,4 @@
-# ktc-gui: StealthChanger web GUI (rev 2, v0.2.6)
+# ktc-gui: StealthChanger web GUI (rev 2, v0.2.8)
 
 Install and updates: see the repo [README](../README.md) (`setup.sh`, Update Manager). Fix list and status: [FIXLIST.md](FIXLIST.md).
 
@@ -39,6 +39,9 @@ Options:
 | `./install.sh --uninstall` | remove the nginx site and `~/ktc-gui` (a link only, never the clone) |
 | `PORT=8091 ./install.sh` | use another port (also `MOONRAKER=host:port`, `DEST=dir`) |
 
+The full uninstall (configs, symlink, this nginx site, optional clone) is
+`uninstall.sh` in the repo root. See the main README.
+
 No hard refresh is needed after an update (v0.2.2 and later). `index.html` loads
 every file with `?v=<version>` and carries `<meta name="ktc-gui-version">`. The
 page asks the web server which version it serves (on connect, Klipper ready,
@@ -70,7 +73,7 @@ another printer, use `http://<gui-host>:8090/?host=<printer-ip>:7125`, or change
 **Settings > Moonraker host** (saved in the browser).
 
 ## What's on the screen
-- **Header:** GUI version and installed git commit (from Moonraker's Update
+- **Header:** Voron Design mark, GUI version and installed git commit (from Moonraker's Update
   Manager; an arrow means an update is waiting, hover for details), printer
   state, toolchanger state, the KTC-E and module versions, and a warning chip
   when a module is missing or too old.
@@ -157,6 +160,9 @@ lists the tool's extruder (else `heater_fan T<n>_hotend_fan`) and
 
 ### Safety
 - Anything that moves the printer, changes a tool or heats asks first.
+- If you pick a tool while X, Y or Z is not homed, the GUI asks "Home now?"
+  Yes homes the printer and then changes tools. No leaves the current tool
+  as it is.
 - While printing or paused, motion and tool-change buttons are greyed out, and
   hovering says why. Temps, fans, the spool editor's Save and tangle mode
   still work mid-print.
@@ -192,6 +198,11 @@ print lock, the nozzle change, the prefs, the LED mapping, tablet width and JS e
 `--shots` saves screenshots to `gui/dev/screenshots/`.
 
 ## Credits
+The header mark is the Voron Design hex logo, inlined from Mainsail's built-in
+Voron logo (`sidebarLogo-voron.svg`). Same artwork as
+VoronDesign/Voron-Extras `Images/Logo/SVG/Hex_Logo.svg`. Both are GPL-3.0.
+Details and the commit ids: [NOTICE.md](../NOTICE.md).
+
 Toolhead art traced from the real CAD (how: `gui/dev/ref/cad/README.md`):
 - **AntHead** by PrintersForAnts, https://github.com/PrintersForAnts/AntHead, GPL-3.0.
 - **LDO Orbiter v2.5 + Orbiter Smart Sensor** CAD by Róbert Lőrincz / Orbiter Projects,
@@ -213,5 +224,7 @@ Clockwork 2 and stays disabled. A profile saved before v0.2.6, with no extruder
 field, comes back as Orbiter 2.5.
 
 ## Later
+- Follow Mainsail's selected logo. The header mark is `#brandLogo`
+  (`data-logo="voron"`); that hook is not wired up.
 - More heads and extruders on the same mount.
 - Mainsail sidebar link and Orca device tab; MCU firmware update page.

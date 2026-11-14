@@ -267,6 +267,7 @@ class Harness:
             inc.append('[include ktc-filament/filament/filament_macros.cfg]')
         if include_orbiter:
             inc.append('[include ktc-filament/orbiter/orbiter_addon.cfg]')
+            inc.append('[include ktc-filament/orbiter/orbiter_pins.cfg]')
         if include_usage:
             inc.append('[include ktc-filament/usage/usage_addon.cfg]')
         # later section wins, exactly like printer.cfg overriding an include

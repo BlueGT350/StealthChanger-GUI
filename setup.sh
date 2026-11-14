@@ -6,26 +6,39 @@
 # Machine > Update Manager, or Orca's Device tab) keeps it up to date.
 # Safe to run again: every step checks first and skips what is already done.
 #
-#   bash setup.sh            normal run
-#   bash setup.sh --no-restart   change files only, restart nothing
+#   bash setup.sh                         ask about Orbiter, then install
+#   bash setup.sh --orbiter               include the Orbiter button add-on
+#   bash setup.sh --no-orbiter            core load/unload only, no buttons
+#   bash setup.sh --no-restart            change files only, restart nothing
+#   bash setup.sh --origin https://github.com/ORG/REPO.git
+#
+# The clone uses HTTPS. The default origin is
+# https://github.com/BlueGT350/StealthChanger-GUI.git. There is no deploy
+# key. --origin points the clone at another repo, and is the only
+# time an existing [update_manager stealthchanger-gui] origin line is changed.
+#
+# Orbiter button pins are written once to
+# ~/printer_data/config/ktc-filament-orbiter.cfg and are not overwritten.
+# See CHANGELOG.md.
 #
 # What it does:
-#  1. clones the public repo over HTTPS to ~/StealthChanger-GUI
-#  2. moves the old ktc-filament folder to ~/stealthchanger-backups/<time>/,
-#     carries your changed settings into ktc-filament-overrides.cfg, and links
+#  1. clones the repo to ~/StealthChanger-GUI over HTTPS
+#  2. moves Orbiter pins out of the clone (backup under stealthchanger-backups)
+#  3. moves an old ktc-filament folder to ~/stealthchanger-backups/<time>/,
+#     carries changed settings into ktc-filament-overrides.cfg, and links
 #     ~/printer_data/config/ktc-filament -> ~/StealthChanger-GUI
-#  3. points the GUI web page (nginx, port 8090) at the clone
-#  4. adds [update_manager stealthchanger-gui] to moonraker.conf if missing
-#  5. adds the usage add-on and overrides includes to printer.cfg if missing
-#  6. restarts Klipper and Moonraker, but never while printing or paused
+#  4. points the GUI web page (nginx, port 8090) at the clone
+#  5. adds [update_manager stealthchanger-gui] to moonraker.conf if missing
+#  6. adds the module includes printer.cfg is missing
+#  7. restarts Klipper and Moonraker, but never while printing or paused
 set -euo pipefail
 
-REPO_SLUG=BlueGT350/StealthChanger-GUI
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PUBLIC_ORIGIN=https://github.com/BlueGT350/StealthChanger-GUI.git
 BRANCH=main
 UM_NAME=stealthchanger-gui
 
 # The SC_* variables exist only for testing setup.sh off the printer.
-ORIGIN=${SC_TEST_ORIGIN:-https://github.com/$REPO_SLUG.git}
 CLONE=${SC_CLONE_DIR:-$HOME/StealthChanger-GUI}
 DATA=${SC_PRINTER_DATA:-$HOME/printer_data}
 CONFIG=$DATA/config
@@ -39,7 +52,10 @@ GUI_LINK_DEFAULT=$HOME/ktc-gui      # where gui/install.sh puts the GUI
 MOONRAKER_URL=${SC_MOONRAKER_URL:-http://127.0.0.1:7125}
 BACKUP=$HOME/stealthchanger-backups/$(date +%Y%m%d-%H%M%S)
 RESTART=1
-[ "${1:-}" = "--no-restart" ] && RESTART=0
+ORB_MODE=keep
+ORIGIN_ARG=
+ORIGIN_EXPLICIT=0
+NONINTERACTIVE=${SC_NONINTERACTIVE:-0}
 
 say()  { printf '\n== %s\n' "$*"; }
 info() { printf '   %s\n' "$*"; }
@@ -49,18 +65,79 @@ backup() {  # backup FILE_OR_DIR  (copy, keeps the original in place)
   cp -a "$1" "$BACKUP/"
   info "backed up $1 -> $BACKUP/$(basename "$1")"
 }
+have_tty() { [ -r /dev/tty ] && { : </dev/tty; } 2>/dev/null; }
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-restart) RESTART=0 ;;
+    --noninteractive) NONINTERACTIVE=1 ;;
+    --orbiter)
+      [ "$ORB_MODE" = keep ] || die "use only one of --orbiter and --no-orbiter"
+      ORB_MODE=on ;;
+    --no-orbiter)
+      [ "$ORB_MODE" = keep ] || die "use only one of --orbiter and --no-orbiter"
+      ORB_MODE=off ;;
+    --origin)
+      shift
+      [ -n "${1:-}" ] || die "--origin needs a git URL (https://...)"
+      ORIGIN_ARG=$1
+      ORIGIN_EXPLICIT=1 ;;
+    --origin=*)
+      ORIGIN_ARG=${1#--origin=}
+      [ -n "$ORIGIN_ARG" ] || die "--origin needs a git URL"
+      ORIGIN_EXPLICIT=1 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    *) die "unknown option: $1 (try --help)" ;;
+  esac
+  shift
+done
+# SC_TEST_ORIGIN clones from a local repo in tests. It is not --origin, so it
+# does not rewrite an existing moonraker.conf origin line.
+if [ -n "${SC_TEST_ORIGIN:-}" ] && [ "$ORIGIN_EXPLICIT" = 0 ]; then
+  ORIGIN_ARG=$SC_TEST_ORIGIN
+  NONINTERACTIVE=1
+fi
+if [ -n "$ORIGIN_ARG" ]; then
+  ORIGIN=$ORIGIN_ARG
+else
+  ORIGIN=$PUBLIC_ORIGIN
+fi
+
 CFG_CHANGED=0      # Klipper needs a restart
 MR_CHANGED=0       # Moonraker needs a restart
 
 [ "$(id -u)" -ne 0 ] || die "run this as your normal user (the one Klipper runs as), not root or sudo."
 for c in git python3; do
-  command -v "$c" >/dev/null || die "'$c' is missing (sudo apt install $c)."
+  command -v "$c" >/dev/null || die "'$c' is missing."
 done
 [ -d "$CONFIG" ] || die "$CONFIG not found. Is this the printer's Pi?"
 [ -f "$MOONRAKER_CONF" ] || die "$MOONRAKER_CONF not found."
 
-# ---------------------------------------------------------------- 1. clone
-say "1. Clone $REPO_SLUG to $CLONE"
+pin_migrate() {  # save Orbiter pins before git fetch can reset them
+  local src=${1:-} mig out
+  mig=$SCRIPT_DIR/tools/migrate_orbiter_pins.py
+  [ -f "$mig" ] || mig=$CLONE/tools/migrate_orbiter_pins.py
+  [ -f "$mig" ] || { info "Orbiter pin migration script not found; skipping"; return 0; }
+  local args=(python3 "$mig" --config "$CONFIG" --backup-dir "$BACKUP" --home "$HOME")
+  [ -d "${CLONE:-}/.git" ] && args+=(--clone "$CLONE")
+  [ -n "$src" ] && args+=(--source "$src")
+  out=$("${args[@]}") || die "Orbiter pin migration failed (clone left as it was if git had not moved yet)"
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] && info "$line"
+  done <<< "$out"
+  case "$out" in *RESTART*) CFG_CHANGED=1 ;; esac
+}
+
+# ---------------------------------------------------------------- 1. pins, then clone
+say "1. Clone $PUBLIC_ORIGIN"
+info "git origin for this run: $ORIGIN"
+# An old real folder (not yet the symlink) still has the edited pins.
+if [ -d "$LINK/orbiter" ] && [ ! -L "$LINK" ]; then
+  pin_migrate "$LINK/orbiter/orbiter_addon.cfg"
+fi
+if [ -d "$CLONE/.git" ]; then
+  pin_migrate
+fi
 if [ -d "$CLONE/.git" ]; then
   cur=$(git -C "$CLONE" remote get-url origin 2>/dev/null || true)
   if [ "$cur" != "$ORIGIN" ]; then
@@ -82,13 +159,14 @@ else
   fi
   git clone --quiet --branch "$BRANCH" "$ORIGIN" "$CLONE"
   info "cloned, version $(git -C "$CLONE" describe --tags --always)"
+  pin_migrate
 fi
 # nginx (www-data) serves the GUI straight from the clone
 chmod o+x "$HOME" "$CLONE" 2>/dev/null || true
 chmod -R o+rX "$CLONE/gui" 2>/dev/null || true
 
-# ---------------------------------------------------------------- 2. config link
-say "2. Link $LINK -> $CLONE"
+# ---------------------------------------------------------------- 3. config link
+say "3. Link $LINK -> $CLONE"
 if [ -L "$LINK" ]; then
   if [ "$(readlink -f "$LINK")" = "$(readlink -f "$CLONE")" ]; then
     info "already linked"
@@ -133,8 +211,8 @@ if [ "${NEW_OVERRIDES:-0}" = 1 ] || { [ -d "$BACKUP/ktc-filament" ] && [ -f "$OV
   [ "$mig" -le 2 ] || die "settings carry-over failed (your old folder is safe in $BACKUP)"
 fi
 
-# ---------------------------------------------------------------- 3. GUI web page
-say "3. GUI web page (nginx)"
+# ---------------------------------------------------------------- 4. GUI web page
+say "4. GUI web page (nginx)"
 have_tty() { [ -r /dev/tty ] && { : </dev/tty; } 2>/dev/null; }
 SUDO_OK=""   # "" = not tried yet, 1 = sudo works without a prompt now, 0 = no sudo
 sudo_ready() {  # ask for the sudo password at most once, and only on a terminal
@@ -212,10 +290,55 @@ else
   fi
 fi
 
-# ---------------------------------------------------------------- 4. moonraker.conf
-say "4. moonraker.conf"
+# ---------------------------------------------------------------- 5. moonraker.conf
+say "5. moonraker.conf"
 if grep -qE "^\[update_manager[[:space:]]+$UM_NAME\]" "$MOONRAKER_CONF"; then
-  info "[update_manager $UM_NAME] already there"
+  if [ "$ORIGIN_EXPLICIT" = 1 ]; then
+    cp -a "$MOONRAKER_CONF" "$MOONRAKER_CONF.origin-bak"
+    um_out=$(python3 - "$MOONRAKER_CONF" "$UM_NAME" "$ORIGIN" <<'PY'
+import sys
+path, name, origin = sys.argv[1:]
+lines = open(path, encoding="utf-8").read().splitlines(keepends=True)
+header = "[update_manager %s]" % name
+start = None
+for i, line in enumerate(lines):
+    if line.strip() == header:
+        start = i
+        break
+if start is None:
+    print("MISSING"); sys.exit(0)
+end = len(lines)
+for j in range(start + 1, len(lines)):
+    if lines[j].startswith("[") and not lines[j][:1].isspace():
+        end = j
+        break
+changed = False
+for j in range(start + 1, end):
+    if lines[j].lstrip().startswith("origin:"):
+        new = "origin: %s\n" % origin
+        if lines[j].rstrip("\r\n") != new.rstrip("\n"):
+            lines[j] = new
+            changed = True
+        break
+else:
+    lines.insert(end, "origin: %s\n" % origin)
+    changed = True
+if changed:
+    open(path, "w", encoding="utf-8").write("".join(lines))
+    print("UPDATED")
+else:
+    print("SAME")
+PY
+)
+    if [ "$um_out" = UPDATED ]; then
+      info "set [update_manager $UM_NAME] origin to $ORIGIN"
+      MR_CHANGED=1
+    else
+      info "[update_manager $UM_NAME] origin already $ORIGIN"
+    fi
+  else
+    info "[update_manager $UM_NAME] already there (origin left as it is; pass --origin to change it)"
+  fi
 else
   backup "$MOONRAKER_CONF"
   nl=""; [ -n "$(tail -c1 "$MOONRAKER_CONF")" ] && nl=$'\n'
@@ -234,70 +357,67 @@ is_system_service: False
 managed_services: klipper
 UM
   } >> "$MOONRAKER_CONF"
-  info "added [update_manager $UM_NAME]"
+  info "added [update_manager $UM_NAME] origin $ORIGIN"
   MR_CHANGED=1
 fi
 
-# ---------------------------------------------------------------- 5. printer.cfg
-say "5. printer.cfg includes"
+# ---------------------------------------------------------------- 6. printer.cfg
+say "6. printer.cfg includes"
+cfg_has() { [ -f "$PRINTER_CFG" ] && grep -qE "^\[include[[:space:]]+$1[[:space:]]*\]" "$PRINTER_CFG"; }
+if [ "$NONINTERACTIVE" = 0 ] && have_tty && [ "$ORB_MODE" = keep ]; then
+  def=Y
+  cfg_has 'ktc-filament/orbiter/orbiter_addon.cfg' || def=N
+  if [ ! -f "$PRINTER_CFG" ] || ! cfg_has 'ktc-filament/filament/filament_macros.cfg'; then
+    def=Y
+  fi
+  if [ "$def" = Y ]; then
+    read -r -p "   Include the Orbiter button add-on? [Y/n] " ans </dev/tty || ans=
+    case "$ans" in n|N|no|NO) ORB_MODE=off ;; *) ORB_MODE=on ;; esac
+  else
+    read -r -p "   Include the Orbiter button add-on? [y/N] " ans </dev/tty || ans=
+    case "$ans" in y|Y|yes|YES) ORB_MODE=on ;; *) ORB_MODE=off ;; esac
+  fi
+fi
+info "Orbiter include: $ORB_MODE"
 if [ ! -f "$PRINTER_CFG" ]; then
   info "$PRINTER_CFG not found. Add these after your KTC-Easy include:"
+  info "  [include ktc-filament/filament/filament_macros.cfg]"
+  [ "$ORB_MODE" != off ] && info "  [include ktc-filament/orbiter/orbiter_addon.cfg]"
+  [ "$ORB_MODE" != off ] && info "  [include ktc-filament-orbiter.cfg]"
   info "  [include ktc-filament/usage/usage_addon.cfg]"
   info "  [include $OVERRIDES_NAME]"
 else
-  PCFG_COPY=$(mktemp)
-  cp -a "$PRINTER_CFG" "$PCFG_COPY"
-  set +e
-  out=$(python3 - "$PRINTER_CFG" "$OVERRIDES_NAME" <<'PY'
-import re, sys
-path, ovr = sys.argv[1], sys.argv[2]
-lines = open(path, encoding="utf-8").read().split("\n")
-inc = re.compile(r"^\[include\s+(\S+)\s*\]")
-def find(name):
-    return [i for i, l in enumerate(lines) if (inc.match(l) or [None, None])[1] == name]
-mods = [i for i, l in enumerate(lines) if inc.match(l) and inc.match(l).group(1).startswith("ktc-filament/")]
-if not mods:
-    print("NOINC"); sys.exit(3)
-added = []
-if not find("ktc-filament/usage/usage_addon.cfg"):
-    last = max(i for i in mods if "/filament/" in lines[i] or "/orbiter/" in lines[i])
-    lines.insert(last + 1, "[include ktc-filament/usage/usage_addon.cfg]")
-    added.append("ktc-filament/usage/usage_addon.cfg")
-    mods = [i for i, l in enumerate(lines) if inc.match(l) and inc.match(l).group(1).startswith("ktc-filament/")]
-o = find(ovr)
-if not o:
-    lines.insert(max(mods) + 1, "[include %s]" % ovr)
-    added.append(ovr)
-elif min(o) < max(mods):
-    print("ORDER")
-if added:
-    open(path, "w", encoding="utf-8").write("\n".join(lines))
-    print("ADDED " + " ".join(added))
-PY
-)
-  rc=$?
-  set -e
-  if [ "$rc" -eq 3 ]; then
+  has_ktc=0
+  grep -qE '^\[include[[:space:]]+ktc-filament/' "$PRINTER_CFG" && has_ktc=1
+  if [ "$has_ktc" = 0 ] && [ "$ORB_MODE" = keep ]; then
     info "printer.cfg has no [include ktc-filament/...] lines, so nothing was changed. Add:"
     info "  [include ktc-filament/filament/filament_macros.cfg]"
-    info "  [include ktc-filament/orbiter/orbiter_addon.cfg]"
+    info "  [include ktc-filament/orbiter/orbiter_addon.cfg]   # optional, --orbiter"
+    info "  [include ktc-filament-orbiter.cfg]                # your button pins"
     info "  [include ktc-filament/usage/usage_addon.cfg]"
     info "  [include $OVERRIDES_NAME]"
-  elif [ "$rc" -ne 0 ]; then
-    die "could not update printer.cfg (unchanged)"
   else
+    PCFG_COPY=$(mktemp)
+    cp -a "$PRINTER_CFG" "$PCFG_COPY"
+    FIL_MODE=keep
+    [ "$has_ktc" = 0 ] && FIL_MODE=on
+    inc_py=$SCRIPT_DIR/tools/printer_includes.py
+    [ -f "$inc_py" ] || inc_py=$CLONE/tools/printer_includes.py
+    out=$(python3 "$inc_py" "$PRINTER_CFG" \
+      --filament "$FIL_MODE" --orbiter "$ORB_MODE" \
+      --usage auto --overrides "$OVERRIDES_NAME") || die "could not update printer.cfg (left unchanged if the write failed)"
     case "$out" in
-      *ADDED*) mkdir -p "$BACKUP" && cp -a "$PCFG_COPY" "$BACKUP/printer.cfg"
-               info "added: ${out#*ADDED } (old printer.cfg in $BACKUP)"; CFG_CHANGED=1 ;;
-      *) info "includes already there" ;;
+      *ADDED*|*REMOVED*)
+        mkdir -p "$BACKUP" && cp -a "$PCFG_COPY" "$BACKUP/printer.cfg"
+        info "$out (old printer.cfg in $BACKUP)"; CFG_CHANGED=1 ;;
+      *) info "includes already match ($out)" ;;
     esac
-    case "$out" in *ORDER*) info "NOTE: [include $OVERRIDES_NAME] must come AFTER the ktc-filament includes. Move it down." ;; esac
+    rm -f "$PCFG_COPY"
   fi
-  rm -f "$PCFG_COPY"
 fi
 
-# ---------------------------------------------------------------- 6. restart
-say "6. Restart"
+# ---------------------------------------------------------------- 7. restart
+say "7. Restart"
 api() {  # api GET|POST PATH -> body on stdout, non-zero on failure
   python3 - "$1" "$MOONRAKER_URL$2" <<'PY'
 import sys, urllib.request

@@ -9,13 +9,14 @@
      the ?v= on every file makes a new release load fresh files (no Ctrl+F5). Keep all equal to
      GUI_VERSION in js/app.js (tests check). The meta no-cache is a hint only: browsers follow the
      server's Cache-Control (gui/install.sh sets no-cache), and the page reloads itself if stale. -->
-<meta name="ktc-gui-version" content="0.2.6">
+<meta name="ktc-gui-version" content="0.2.8">
 <meta http-equiv="Cache-Control" content="no-cache">
-<link rel="stylesheet" href="style.css?v=0.2.6">
+<link rel="stylesheet" href="style.css?v=0.2.8">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="logo">&#9650;</span> <span class="bname">StealthChanger</span> <small id="verTag" class="vertag" title="GUI version">v</small> <small id="printerName"></small></div>
+  <div class="brand"><!-- #brandLogo is the Voron Design mark (see NOTICE.md).
+       Future hook: follow Mainsail's selected logo by swapping this SVG. Not implemented. --><span class="logo" id="brandLogo" data-logo="voron" role="img" aria-label="Voron Design" title="Voron Design"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 36" aria-hidden="true" focusable="false" shape-rendering="geometricPrecision"><path fill="currentColor" fill-rule="evenodd" d="M15.588,0L0,9L0,27.001L15.588,36L31.176,27.001L31.176,9L15.588,0ZM11.004,8.215L15.707,8.215L9.275,18L4.572,18L11.004,8.215ZM6.805,27.785L19.67,8.215L24.372,8.215L11.507,27.785L6.805,27.785ZM20.172,27.785L15.470,27.785L21.901,18L26.604,18L20.172,27.785Z"/></svg></span> <span class="bname">StealthChanger</span> <small id="verTag" class="vertag" title="GUI version">v</small> <small id="printerName"></small></div>
   <div class="chips">
     <span id="connChip" class="chip" title="Moonraker websocket">connecting</span>
     <span id="stateChip" class="chip" title="Klipper print_stats.state">-</span>
@@ -176,9 +177,9 @@
   </form>
 </dialog>
 
-<script src="js/rpc.js?v=0.2.6"></script>
-<script src="js/commands.js?v=0.2.6"></script>
-<script src="js/art.js?v=0.2.6"></script>
-<script src="js/app.js?v=0.2.6"></script>
+<script src="js/rpc.js?v=0.2.8"></script>
+<script src="js/commands.js?v=0.2.8"></script>
+<script src="js/art.js?v=0.2.8"></script>
+<script src="js/app.js?v=0.2.8"></script>
 </body>
 </html>

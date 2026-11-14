@@ -8,7 +8,7 @@ which runs the macros through real Klipper code and Mainsail's console filter.""
 import configparser, re, shlex, sys, ast, copy, io
 import jinja2
 
-FILES = ['filament/filament_macros.cfg', 'orbiter/orbiter_addon.cfg', 'orbiter/tool_snippet_T0.cfg', 'usage/usage_addon.cfg']
+FILES = ['filament/filament_macros.cfg', 'orbiter/orbiter_addon.cfg', 'orbiter/orbiter_pins.cfg', 'orbiter/tool_snippet_T0.cfg', 'usage/usage_addon.cfg']
 
 def load(path):
     cp = configparser.RawConfigParser(strict=False, inline_comment_prefixes=(';', '#'))

@@ -34,7 +34,9 @@ RELEASED = {
     "filament/filament_macros.cfg": {
         "0.1.0": "8d2f7dadf28f54299d0c2d3a9577a43bd9b74e923bce189739ce9a2f88c637d6", "0.2.0": "57fc0ad257fa8de8fc337aa6938d7554e25c283a09036fd024847cad1e842217"},
     "orbiter/orbiter_addon.cfg": {
-        "0.1.0": "3e1a6c631a2f3a5a348e13e060d81883cdb12fe925b35eab63a0f47f00c478ef", "0.2.0": "3e1a6c631a2f3a5a348e13e060d81883cdb12fe925b35eab63a0f47f00c478ef"},
+        "0.1.0": "3e1a6c631a2f3a5a348e13e060d81883cdb12fe925b35eab63a0f47f00c478ef",
+        "0.2.0": "3e1a6c631a2f3a5a348e13e060d81883cdb12fe925b35eab63a0f47f00c478ef",
+        "0.2.7": "bfe1bb4dcf55d39180e6c5d171f8fdf28ae98ad5d685d53613a4adb70d466365"},
     "usage/usage_addon.cfg": {
         "0.2.0": "82bad8a3ef52a4aa5a453a781b1a8bc623cba0e747f5edbd745a50c4b87073d9"},
 }

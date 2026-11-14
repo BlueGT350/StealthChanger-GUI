@@ -3,7 +3,10 @@
  * Flow: connect -> identify -> printer.info -> detect modules -> subscribe -> render on diffs. */
 (function (KTC) {
   'use strict';
-  var GUI_VERSION = '0.2.6';
+  var GUI_VERSION = '0.2.8';
+  /* #brandLogo in index.html is the Voron Design header mark.
+     Future hook: follow Mainsail's selected logo by swapping that SVG.
+     Not implemented; data-logo stays "voron". */
   var C = KTC.cmd, ART = KTC.art;
   var $ = function (id) { return document.getElementById(id); };
   var DB_NS = 'ktc_gui';
@@ -25,7 +28,7 @@
   var S = {
     rpc: null, connected: false, ready: false, klippy: 'unknown', detecting: false,
     objects: new Set(), help: {}, st: {}, mods: {}, tools: [], names: {}, info: {},
-    prefs: { heads: {} }, prefsStore: 'db', buttons: [], updaters: [], ui: {}, tab: null,
+    prefs: { heads: {} }, prefsStore: 'db', buttons: [], updaters: [], ui: {}, tab: null, homing: false,
     prevActive: null, sm: { ok: false, connected: false, spools: [], byId: {}, active: null, loading: false, err: null },
     conflicts: null
   };
@@ -111,13 +114,14 @@
   }
 
   /* ---------- confirm / value dialogs ---------- */
-  function confirmDlg(title, text, cmd, yesLabel) {
+  function confirmDlg(title, text, cmd, yesLabel, noLabel) {
     return new Promise(function (resolve) {
       var d = $('dlgConfirm');
       $('cfTitle').textContent = title;
       $('cfText').textContent = text;
       $('cfCmd').textContent = Array.isArray(cmd) ? cmd.join('\n') : (cmd || '');
       $('cfYes').textContent = yesLabel || 'Run';
+      $('cfNo').textContent = noLabel || 'Cancel';
       d.returnValue = '';
       d.onclose = function () { resolve(d.returnValue === 'yes'); };
       d.showModal();
@@ -160,6 +164,7 @@
     if (!S.connected) return 'Not connected to Moonraker';
     if (!S.ready) return 'Klipper is not ready (' + S.klippy + ')';
     if (kind === 'motion' || kind === 'change') {
+      if (S.homing) return 'Homing...';
       if (printState() === 'printing') return 'Locked while printing';
       if (isPaused()) return 'Locked while a print is paused (resume or cancel first)';
       if (st('toolchanger').status === 'changing') return 'Wait, a tool change is in progress';
@@ -169,14 +174,63 @@
   }
   /* KTC-E aborts a tool change on unhomed axes unless on_axis_not_homed: home,
    * and the calibration macros move to fixed XY. Buttons with home:true check
-   * toolhead.homed_axes at click time and put G28 in front when needed. */
+   * toolhead.homed_axes at click time and put G28 in front when needed.
+   * A tool change itself is not sent until X, Y and Z are homed: sending T#
+   * while unhomed resets KTC tool state. The user is asked first. */
   function needsHome() {
     var h = lc(st('toolhead').homed_axes);
     return ['x', 'y', 'z'].some(function (a) { return h.indexOf(a) < 0; });
   }
+  function isToolchange(script) {
+    var lines = (Array.isArray(script) ? script : String(script).split('\n'))
+      .map(function (l) { return l.trim(); }).filter(Boolean);
+    return lines.length > 0 && lines.every(function (l) {
+      return /^(T\d+|SELECT_TOOL|UNSELECT_TOOL)\b/i.test(l);
+    });
+  }
   function withHome(script) {
     if (!needsHome() || !has('G28')) return script;
     return ['G28'].concat(Array.isArray(script) ? script : String(script).split('\n'));
+  }
+  var homeWait = [];
+  function watchHomed(fn) {
+    homeWait.push(fn);
+    return function () {
+      var i = homeWait.indexOf(fn);
+      if (i >= 0) homeWait.splice(i, 1);
+    };
+  }
+  /* Yes on the homing dialog: G28, then the tool change once homed_axes is xyz
+   * or the command finishes. An error is shown and the tool change is not sent. */
+  function homeThen(script, btn) {
+    if (!needsHome()) { run(script, btn); return; }
+    S.homing = true;
+    if (btn) btn.dataset.busy = '1';
+    banner('home', 'Homing...', 'info');
+    updateButtons();
+    var settled = false;
+    function cleanup() {
+      S.homing = false;
+      if (btn) delete btn.dataset.busy;
+      banner('home', null);
+      updateButtons();
+    }
+    function succeed() {
+      if (settled) return;
+      settled = true;
+      stop();
+      cleanup();
+      run(script, btn);
+    }
+    function fail(e) {
+      if (settled) return;
+      settled = true;
+      stop();
+      cleanup();
+      toast('Klipper refused: ' + String((e && e.message) || e));
+    }
+    var stop = watchHomed(function () { if (!needsHome()) succeed(); });
+    send('G28').then(succeed, fail);
   }
   var HOME_NOTE = 'The printer is not homed (homed: ', HOME_NOTE2 = '), so G28 runs first.';
   /* o: {label, title, kind: free|motion|change, cmd: string|array|fn, confirm: obj|fn, when: fn -> reason|null, cls, fn,
@@ -190,6 +244,11 @@
       var script;
       try { script = typeof o.cmd === 'function' ? o.cmd() : o.cmd; } catch (e) { toast(e.message || String(e)); return; }
       if (!script) return;
+      if (needsHome() && (o.kind === 'change' || isToolchange(script))) {
+        confirmDlg('Homing required', 'The printer must be homed (XYZ) before changing tools. Home now?',
+          '', 'Yes', 'No').then(function (ok) { if (ok) homeThen(script, b); });
+        return;
+      }
       var homing = false;
       if (o.home && needsHome() && has('G28')) { script = withHome(script); homing = true; }
       var hn = homing ? HOME_NOTE + ((st('toolhead').homed_axes || 'none').toUpperCase() || 'none') + HOME_NOTE2 : '';
@@ -320,6 +379,8 @@
   }
   function mergeStatus(diff) {
     Object.keys(diff || {}).forEach(function (k) { S.st[k] = Object.assign(S.st[k] || {}, diff[k]); });
+    if (!diff || !diff.toolhead || diff.toolhead.homed_axes == null) return;
+    homeWait.slice().forEach(function (fn) { try { fn(); } catch (e) { console.error(e); } });
   }
 
   /* ---------- detection ---------- */
@@ -1456,7 +1517,7 @@
     add(p, grp('Pick up tool', S.tools.map(function (n) {
       return mkBtn({ label: 'T' + n, kind: 'change', cmd: 'T' + n, title: 'Pick up T' + n + ' (T' + n + ')', home: true,
         when: function () { return st('toolchanger').tool_number === n ? 'T' + n + ' is on the shuttle' : null; } });
-    }), 'Same as clicking a toolhead above. If the printer is not homed, G28 runs first (you are asked).'));
+    }), 'Same as clicking a toolhead above. If X, Y and Z are not homed, nothing is sent until you agree to home.'));
     add(p, grp('Heaters', [
       maybe('TURN_OFF_HEATERS', { label: 'All heaters off', cmd: 'TURN_OFF_HEATERS', title: 'Turn every heater off (TURN_OFF_HEATERS)',
         when: function () { return printState() === 'printing' ? 'Locked while printing' : null; } })

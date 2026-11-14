@@ -383,20 +383,107 @@ def run(a):
             tab.screenshot(path=os.path.join(SHOTS, 'tablet_820_filament.png'))
             tab.close()
 
-        print('rev 2: home before moves (item 1)')
+        print('rev 2: home before a tool change')
         restart(page)
         api('/mock/set', {'homed': ''})
         page.wait_for_timeout(400)
         n0 = len(log()['gcode'])
         page.locator('.col[data-tool="3"] .headwrap').click()
         page.wait_for_selector('#dlgConfirm[open]')
-        cmd = page.inner_text('#cfCmd')
-        check('unhomed pick-up asks and puts G28 first', cmd.split('\n')[0].strip() == 'G28' and 'T3' in cmd
-              and 'not homed' in page.inner_text('#dlgConfirm'), cmd)
+        dlg = page.inner_text('#dlgConfirm')
+        check('not homed: homing modal', page.inner_text('#cfTitle') == 'Homing required'
+              and page.inner_text('#cfText') == 'The printer must be homed (XYZ) before changing tools. Home now?'
+              and page.inner_text('#cfYes') == 'Yes' and page.inner_text('#cfNo') == 'No'
+              and (page.text_content('#cfCmd') or '').strip() == '', dlg)
+        if a.shots:
+            page.screenshot(path=os.path.join(SHOTS, 'homing_required.png'))
+        page.click('#cfNo')
+        page.wait_for_function('() => !document.getElementById("dlgConfirm").open')
+        page.wait_for_timeout(300)
+        check('No sends no gcode', log()['gcode'][n0:] == [], log()['gcode'][n0:])
+        check('No leaves the tool on the shuttle', 'active' in page.locator('.head').nth(0).get_attribute('class')
+              and 'active' not in (page.locator('.head').nth(3).get_attribute('class') or ''))
+
+        page.click('#tabs [data-tab=tool]')
+        page.wait_for_timeout(200)
+        n0 = len(log()['gcode'])
+        page.locator('#pane-tool').get_by_role('button', name='T4', exact=True).click()
+        page.wait_for_selector('#dlgConfirm[open]')
+        check('T# button asks when not homed', page.inner_text('#cfTitle') == 'Homing required')
+        page.click('#cfNo')
+        page.wait_for_timeout(300)
+        check('T# No sends no gcode', log()['gcode'][n0:] == [], log()['gcode'][n0:])
+
+        api('/mock/set', {'homed': 'xy'})
+        page.wait_for_timeout(300)
+        n0 = len(log()['gcode'])
+        page.locator('.col[data-tool="3"] .headwrap').click()
+        page.wait_for_selector('#dlgConfirm[open]')
+        check('missing Z still asks before a tool change', page.inner_text('#cfTitle') == 'Homing required')
+        page.click('#cfNo')
+        page.wait_for_timeout(200)
+        check('missing Z No sends nothing', log()['gcode'][n0:] == [], log()['gcode'][n0:])
+        api('/mock/set', {'homed': ''})
+        page.wait_for_timeout(300)
+
+        page.evaluate('''() => {
+          const rpc = window.KTC.app.S.rpc, orig = rpc.call.bind(rpc);
+          window.__rpcCall = orig;
+          rpc.call = function (method, params) {
+            if (method === 'printer.gcode.script' && params && String(params.script).trim() === 'G28')
+              return Promise.reject(new Error('Homing failed'));
+            return orig(method, params);
+          };
+        }''')
+        n0 = len(log()['gcode'])
+        page.locator('.col[data-tool="3"] .headwrap').click()
+        page.wait_for_selector('#dlgConfirm[open]')
         page.click('#cfYes')
+        page.wait_for_selector('#banners .toast', timeout=5000)
+        check('G28 error is shown and the tool is not changed', 'Homing failed' in page.inner_text('#banners')
+              and 'active' in page.locator('.head').nth(0).get_attribute('class')
+              and not any(g.strip() == 'T3' for g in log()['gcode'][n0:]),
+              (page.inner_text('#banners'), log()['gcode'][n0:]))
+        page.evaluate('() => { window.KTC.app.S.rpc.call = window.__rpcCall; }')
+        page.wait_for_function('() => !window.KTC.app.S.homing')
+
+        # hold G28 so the busy state is visible, then let the real command run
+        page.evaluate('''() => {
+          const rpc = window.KTC.app.S.rpc, orig = rpc.call.bind(rpc);
+          window.__rpcCall = orig;
+          rpc.call = function (method, params) {
+            if (method === 'printer.gcode.script' && params && String(params.script).trim() === 'G28')
+              return new Promise(function (resolve, reject) {
+                setTimeout(function () { orig(method, params).then(resolve, reject); }, 400);
+              });
+            return orig(method, params);
+          };
+        }''')
+        n0 = len(log()['gcode'])
+        page.locator('.col[data-tool="3"] .headwrap').click()
+        page.wait_for_selector('#dlgConfirm[open]')
+        page.click('#cfYes')
+        page.wait_for_selector('[data-banner=home]', timeout=2000)
+        check('Yes shows a homing busy state and has not changed tools yet',
+              page.inner_text('[data-banner=home]') == 'Homing...'
+              and page.locator('.col[data-tool="3"] .headwrap').is_disabled()
+              and not any(g.strip() == 'T3' for g in log()['gcode'][n0:]),
+              (page.inner_text('[data-banner=home]'), log()['gcode'][n0:]))
         page.wait_for_function('() => document.querySelectorAll(".head")[3].classList.contains("active")', timeout=15000)
-        sent = log()['gcode'][n0:]
-        check('G28 then T3 sent, homed afterwards', sent and sent[0].startswith('G28') and any('T3' in g for g in sent), sent)
+        sent = [g.strip() for g in log()['gcode'][n0:]]
+        check('Yes sends G28 then the toolchange', sent[:2] == ['G28', 'T3'], sent)
+        page.evaluate('() => { window.KTC.app.S.rpc.call = window.__rpcCall; }')
+        page.wait_for_function('() => window.KTC.app.S.st.toolchanger.status === "ready"', timeout=15000)
+
+        n0 = len(log()['gcode'])
+        page.locator('.col[data-tool="1"] .headwrap').click()
+        page.wait_for_function('() => document.querySelectorAll(".head")[1].classList.contains("active")', timeout=15000)
+        sent = [g.strip() for g in log()['gcode'][n0:]]
+        check('homed: direct toolchange, no modal', page.locator('#dlgConfirm[open]').count() == 0
+              and sent == ['T1'], sent)
+        page.wait_for_function('() => window.KTC.app.S.st.toolchanger.status === "ready"', timeout=15000)
+
+        print('rev 2: home before moves (item 1)')
         page.click('#tabs [data-tab=cal]')
         page.wait_for_timeout(200)
         page.get_by_role('button', name='Calibrate all offsets').click()

@@ -110,6 +110,62 @@ mkhome h; rm -rf "$H/ktc-gui"; mkdir "$H/elsewhere"; ln -s "$H/elsewhere" "$H/kt
 run FAKE_SUDO=none
 ok "relinked from the old target" 'grep -q "was a link to $H/elsewhere; relinking" <<<"$OUT" && linked'
 
+echo "9. HTTPS origin, no deploy key; --origin only rewrites an existing section"
+mkhome i
+run FAKE_SUDO=nopasswd
+ok "new update_manager section uses the URL this run cloned" 'grep -q "origin: $T/bare.git" "$H/printer_data/config/moonraker.conf"'
+ok "no deploy key" '! grep -q "deploy key" <<<"$OUT" && [ ! -e "$H/.ssh/stealthchanger_gui_deploy" ]'
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" SC_TEST_ORIGIN="$T/bare.git" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --no-restart --origin https://example.com/private.git </dev/null 2>&1)
+RC=$?
+ok "--origin rewrites the existing section" '[ $RC -eq 0 ] && grep -q "^origin: https://example.com/private.git$" "$H/printer_data/config/moonraker.conf"'
+run FAKE_SUDO=nopasswd
+ok "a later run without --origin leaves that origin" 'grep -q "^origin: https://example.com/private.git$" "$H/printer_data/config/moonraker.conf"'
+mkhome j
+git clone -q "$T/bare.git" "$H/StealthChanger-GUI"
+echo dirty >> "$H/StealthChanger-GUI/README.md"
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --no-restart </dev/null 2>&1)
+RC=$?
+ok "default origin is the public HTTPS repo" '[ $RC -eq 0 ] && grep -q "^origin: https://github.com/BlueGT350/StealthChanger-GUI.git$" "$H/printer_data/config/moonraker.conf"'
+ok "dirty clone was not fetched from GitHub" 'grep -q "local edits" <<<"$OUT"'
+
+echo "10. --orbiter / --no-orbiter"
+mkhome k
+# drop the orbiter include the fixture starts with
+python3 - "$H/printer_data/config/printer.cfg" <<'PY'
+import sys
+p=sys.argv[1]
+t=open(p).read().replace("[include ktc-filament/orbiter/orbiter_addon.cfg]\n","")
+open(p,"w").write(t)
+PY
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" SC_TEST_ORIGIN="$T/bare.git" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --no-restart --orbiter </dev/null 2>&1)
+RC=$?
+ok "--orbiter adds the add-on and the user pin include" '[ $RC -eq 0 ] && grep -q "^\[include ktc-filament/orbiter/orbiter_addon.cfg\]$" "$H/printer_data/config/printer.cfg" && grep -q "^\[include ktc-filament-orbiter.cfg\]$" "$H/printer_data/config/printer.cfg"'
+ok "pin file created once from the template" 'cmp -s "$REPO/orbiter/orbiter_pins.cfg" "$H/printer_data/config/ktc-filament-orbiter.cfg"'
+cp -a "$H/printer_data/config/ktc-filament-orbiter.cfg" "$T/pins-once"
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" SC_TEST_ORIGIN="$T/bare.git" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --no-restart --orbiter </dev/null 2>&1)
+ok "second run does not overwrite the pin file" 'cmp -s "$T/pins-once" "$H/printer_data/config/ktc-filament-orbiter.cfg"'
+echo 'pin: ^nhkT0:gpio99' >> "$H/printer_data/config/ktc-filament-orbiter.cfg"
+cp -a "$H/printer_data/config/ktc-filament-orbiter.cfg" "$T/pins-edited"
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" SC_TEST_ORIGIN="$T/bare.git" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --no-restart --no-orbiter </dev/null 2>&1)
+RC=$?
+ok "--no-orbiter comments the includes and keeps the pin file" '[ $RC -eq 0 ] && grep -q "^# \[include ktc-filament/orbiter/orbiter_addon.cfg\]" "$H/printer_data/config/printer.cfg" && grep -q "^# \[include ktc-filament-orbiter.cfg\]" "$H/printer_data/config/printer.cfg" && cmp -s "$T/pins-edited" "$H/printer_data/config/ktc-filament-orbiter.cfg"'
+cp -a "$H/printer_data/config/printer.cfg" "$T/before-conflict"
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" SC_TEST_ORIGIN="$T/bare.git" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --orbiter --no-orbiter </dev/null 2>&1)
+RC=$?
+ok "both orbiter flags is an error and does not edit printer.cfg" '[ $RC -ne 0 ] && cmp -s "$T/before-conflict" "$H/printer_data/config/printer.cfg"'
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

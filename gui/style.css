@@ -18,6 +18,9 @@ button { font: inherit; color: inherit; }
 .brand { font-weight: 600; font-size: 16px; white-space: nowrap; }
 .brand small { color: var(--muted); font-weight: 400; margin-left: 6px; }
 .logo { color: var(--red); }
+/* Header mark only. Toolhead drawings use <g class="logo"> and keep the rule above. */
+.brand .logo { color: #FF2300; display: inline-block; line-height: 0; vertical-align: middle; }
+.brand .logo svg { display: block; height: 1em; width: auto; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; align-items: center; }
 .chip { display: inline-block; padding: 2px 9px; border-radius: 12px; background: var(--card2); color: var(--muted);
   font-size: 12px; border: 1px solid var(--line); white-space: nowrap; margin-right: 4px; }
