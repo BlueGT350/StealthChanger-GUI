@@ -3,7 +3,7 @@
  * Flow: connect -> identify -> printer.info -> detect modules -> subscribe -> render on diffs. */
 (function (KTC) {
   'use strict';
-  var GUI_VERSION = '0.2.8';
+  var GUI_VERSION = '0.2.12';
   /* #brandLogo in index.html is the Voron Design header mark.
      Future hook: follow Mainsail's selected logo by swapping that SVG.
      Not implemented; data-logo stays "voron". */
@@ -1460,6 +1460,7 @@
     var tabs = [['tool', 'Tool actions', buildToolTab], ['cal', 'Calibration', buildCalTab], ['rec', 'Recovery', buildRecTab]];
     if (S.mods.fil) tabs.push(['fil', 'Filament', buildFilTab]);
     if (S.mods.es && S.mods.fil) tabs.push(['es', 'Endless spool', buildEsTab]);
+    tabs.push(['fw', 'Firmware', buildFirmwareTab]);
     var nav = $('tabs'), body = $('tabBody');
     nav.innerHTML = ''; body.innerHTML = '';
     var want = localStorage.getItem('ktc_gui_tab');
@@ -1476,6 +1477,9 @@
     localStorage.setItem('ktc_gui_tab', id);
     Array.prototype.forEach.call($('tabs').children, function (b) { b.setAttribute('aria-selected', b.dataset.tab === id ? 'true' : 'false'); });
     Array.prototype.forEach.call($('tabBody').children, function (p) { p.hidden = p.id !== 'pane-' + id; });
+    // The firmware helper is contacted only while this tab is open, so a
+    // missing helper does not mark every other tab with a failed request.
+    if (id === 'fw' && KTC.firmware && KTC.firmware.onShow) KTC.firmware.onShow();
   }
   function grp(title, kids, note) {
     kids = kids.filter(Boolean);
@@ -1700,6 +1704,31 @@
   }
   function buildEsTab(p) {
     p.appendChild(el('div', { class: 'muted', text: 'Endless spool module v' + (S.mods.esV || '?') + ' found. Its controls arrive with the endless spool GUI update.' }));
+  }
+  /* Local print_stats check. The helper checks again, including immediately
+   * before it stops Klipper. Missing state refuses: we will not flash when
+   * we cannot see whether a print is running. */
+  function firmwarePrintBlock() {
+    if (!S.connected) return 'Not connected to Moonraker. Flashing is refused because the print state cannot be checked.';
+    var ps = st('print_stats').state;
+    if (!ps) return 'print_stats.state is not available yet. Flashing is refused.';
+    if (ps === 'printing' || ps === 'paused') {
+      return 'Firmware update refused: the printer is ' + ps + '. Wait until the print is idle.';
+    }
+    return null;
+  }
+  function buildFirmwareTab(p) {
+    if (!KTC.firmware) {
+      p.appendChild(el('div', { class: 'muted', text: 'Firmware tab did not load.' }));
+      return;
+    }
+    KTC.firmware.build(p, {
+      el: el,
+      confirmDlg: confirmDlg,
+      toast: toast,
+      printBlock: firmwarePrintBlock,
+      onUpdate: function (fn) { S.updaters.push(fn); }
+    });
   }
 
   /* ---------- spool editor ---------- */

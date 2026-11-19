@@ -300,6 +300,41 @@ table.utab td.acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: cent
 .cfbox.bad { border-left: 4px solid var(--red); background: #2c1112; color: #ffd0d1; }
 .cfbox ul { margin: 6px 0; padding-left: 18px; }
 .cfbox li { overflow-wrap: anywhere; }
+.fwtop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fwtop h4 { margin: 0; }
+.fwname { min-width: 8em; }
+.fwlabel { width: 11em; max-width: 100%; }
+/* One card per board, same surface as the other cards (border, radius, background). */
+.fwboards { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.fwboard .fwtop { align-items: flex-start; justify-content: space-between; }
+.fwboard .fwidentity { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; flex: 1 1 160px; }
+.fwboard .fwstatus { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; margin-left: auto; }
+.fwboard h4 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: 0; }
+.fwboard .kv { margin-top: 8px; grid-template-columns: max-content minmax(0, 1fr); }
+.fwboard .kv span { min-width: 0; overflow-wrap: anywhere; }
+.fwboard .btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+.fwboard .banner { margin: 8px 0; }
+.fwboard .banner.bad { padding: 8px 12px; border-radius: 6px; border-left: 4px solid var(--red);
+  background: #2c1112; color: #ffd0d1; }
+.fwhelper-warn { margin: 8px 0; padding: 6px 10px; border-radius: 6px; border-left: 4px solid var(--amber);
+  background: #2a2410; color: #ffe9a8; font-size: 12px; line-height: 1.35; }
+.badge.req { color: #ffe082; border-color: #8d6e00; background: #2e2700; font-weight: 650; }
+.badge.ok { color: #c8e6c9; border-color: #2e7d32; background: #1b2e1c; font-weight: 650; }
+.fwcfg .fwfields { overflow: auto; max-height: min(60vh, 520px); margin: 8px 0; padding-right: 4px; }
+.fwcfg .fwmenu { margin: 8px 0; padding: 4px 0 4px 10px; border-left: 2px solid var(--line); }
+.fwcfg .fwmenu-title { margin: 0 0 6px; font-size: 14px; }
+.fwcfg label.fwcheck { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+.fwcfg .fwcomment { margin: 4px 0 8px; }
+.fwcfg .fwprefill:empty { display: none; }
+.fwcfg .fwprefill { margin: 6px 0; color: var(--text); }
+.fwcfg .fwfields label.fwcheck { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; margin: 4px 0; }
+.grp .banner.bad { padding: 8px 12px; border-radius: 6px; border-left: 4px solid var(--red);
+  background: #2c1112; color: #ffd0d1; }
+.fwlog { background: #101010; border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0 0;
+  min-height: 72px; max-height: 240px; overflow: auto; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word; }
+.fwlog .err { color: #ff8a80; }
+.grp .banner { margin: 8px 0; }
 .spgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 
 @media (max-width: 1100px) {
@@ -339,6 +374,9 @@ table.utab td.acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: cent
   table.ftab td, table.ftab th { padding: 5px 4px; }
   table.ftab td.acts button, table.utab td.acts button { padding: 4px 7px; font-size: 12px; }
   table.utab th:nth-child(3), table.utab td:nth-child(3) { display: none; }
+  .fwboard .fwlabel { width: 100%; }
+  .fwboard .fwstatus { justify-content: flex-start; margin-left: 0; }
+  .fwboard .btns .btn { flex: 1 1 auto; }
 }
 @media (max-width: 400px) {
   .brand { font-size: 13px; }

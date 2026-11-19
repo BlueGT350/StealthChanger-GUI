@@ -2,7 +2,7 @@
 
 The StealthChanger GUI is a web page for a Voron toolchanger that already runs KTC-Easy, Klipper, Moonraker, and Mainsail.
 
-Current release: **v0.2.8**.
+Current release: **v0.2.12**.
 
 **Docs:** <https://bluegt350.github.io/StealthChanger-GUI/>.
 
@@ -106,6 +106,11 @@ itself onto the new version.
 If you are updating from v0.2.6 or earlier and use the Orbiter add-on,
 re-run `setup.sh` once after the Update Manager finishes so button pins move
 into `~/printer_data/config/ktc-filament-orbiter.cfg` (a backup is made).
+
+v0.2.9 to v0.2.12 add a Firmware tab for checking and flashing each board's
+Klipper firmware (see `CHANGELOG.md`). After updating to v0.2.12, run
+`bash ~/StealthChanger-GUI/setup.sh` once so the firmware helper is installed
+and restarts itself on later updates.
 
 ## Licence
 

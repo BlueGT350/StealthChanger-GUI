@@ -28,9 +28,11 @@
 #     carries changed settings into ktc-filament-overrides.cfg, and links
 #     ~/printer_data/config/ktc-filament -> ~/StealthChanger-GUI
 #  4. points the GUI web page (nginx, port 8090) at the clone
-#  5. adds [update_manager stealthchanger-gui] to moonraker.conf if missing
-#  6. adds the module includes printer.cfg is missing
-#  7. restarts Klipper and Moonraker, but never while printing or paused
+#  5. installs the firmware helper (127.0.0.1 only) and, on a real printer,
+#     refreshes the nginx site so /firmware/ is same-origin
+#  6. adds [update_manager stealthchanger-gui] to moonraker.conf if missing
+#  7. adds the module includes printer.cfg is missing
+#  8. restarts Klipper and Moonraker, but never while printing or paused
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -85,7 +87,7 @@ while [ $# -gt 0 ]; do
       ORIGIN_ARG=${1#--origin=}
       [ -n "$ORIGIN_ARG" ] || die "--origin needs a git URL"
       ORIGIN_EXPLICIT=1 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
   shift
@@ -289,6 +291,79 @@ else
     info "  bash $CLONE/gui/install.sh --link"
   fi
 fi
+
+# ---------------------------------------------------------------- 4b. firmware helper
+# User files (menuconfig) live outside the clone and are never overwritten.
+# The unit is a user service. systemctl is skipped when KTC_NGINX_DIR is set,
+# which the setup tests do, so a test run cannot enable a service on this machine.
+install_firmware_helper() {
+  local unit_dir unit py dest cfg tmp
+  unit_dir="$HOME/.config/systemd/user"
+  unit="$unit_dir/stealthchanger-firmware.service"
+  py=$(command -v python3)
+  dest="$CLONE/firmware/firmware_helper.py"
+  cfg="$CONFIG/stealthchanger-firmware"
+  mkdir -p "$unit_dir" "$cfg"
+  if [ ! -f "$dest" ]; then
+    info "firmware helper source not in this clone ($dest); skipping"
+    return 0
+  fi
+  tmp=$(mktemp)
+  cat > "$tmp" <<EOF
+[Unit]
+Description=StealthChanger firmware helper
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$HOME
+ExecStart=$py $dest
+# A clean exit means the helper noticed its own code changed (Moonraker
+# cannot restart a --user service). Restart=always brings the new code back.
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+EOF
+  if [ -f "$unit" ] && cmp -s "$tmp" "$unit"; then
+    info "firmware helper unit already installed"
+    rm -f "$tmp"
+  else
+    mv "$tmp" "$unit"
+    info "wrote $unit (listens on 127.0.0.1:7140)"
+  fi
+  info "MCU menuconfig files: $cfg (not in the git clone, not overwritten by updates)"
+  if [ "${KTC_NGINX_DIR:-/etc/nginx}" != /etc/nginx ]; then
+    info "firmware helper unit is in place (systemd enable skipped in this environment)"
+    return 0
+  fi
+  if command -v nginx >/dev/null 2>&1 && sudo_ready; then
+    if bash "$CLONE/gui/install.sh" --link; then
+      info "nginx proxies /firmware/ to the helper"
+    else
+      info "could not refresh the nginx site. Re-run: bash $CLONE/gui/install.sh --link"
+    fi
+  else
+    info "To proxy /firmware/ on the GUI port, run: bash $CLONE/gui/install.sh --link"
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    info "systemctl not found. Start the helper with: $py $dest"
+    return 0
+  fi
+  systemctl --user daemon-reload || info "could not reload the user systemd (the unit file is in place)"
+  # enable --now does not restart a helper that is already running, so an
+  # update would leave the old process in place. Enable, then restart.
+  if ! systemctl --user enable stealthchanger-firmware.service; then
+    info "could not enable the firmware helper. Try: systemctl --user enable stealthchanger-firmware.service && systemctl --user restart stealthchanger-firmware.service"
+    return 0
+  fi
+  systemctl --user restart stealthchanger-firmware.service \
+    || info "could not restart the firmware helper. Try: systemctl --user restart stealthchanger-firmware.service"
+}
+say "4b. Firmware helper"
+install_firmware_helper
 
 # ---------------------------------------------------------------- 5. moonraker.conf
 say "5. moonraker.conf"

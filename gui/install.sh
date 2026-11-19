@@ -15,6 +15,7 @@ set -euo pipefail
 
 PORT=8090
 MOONRAKER=127.0.0.1:7125
+FW_UPSTREAM=${SC_FIRMWARE_UPSTREAM:-127.0.0.1:7140}
 DEST="$HOME/ktc-gui"
 SITE=ktc-gui
 FILES_ONLY=0
@@ -43,6 +44,9 @@ site_exists() { sudo test -f "$1" 2>/dev/null; }
 
 if [ "$UNINSTALL" = 1 ]; then
   sudo rm -f "$ENABLED" "$AVAIL" "$AVAIL.bak"
+  if [ -f /etc/sudoers.d/stealthchanger-firmware ]; then
+    sudo rm -f /etc/sudoers.d/stealthchanger-firmware
+  fi
   if command -v nginx >/dev/null; then sudo nginx -t && sudo systemctl reload nginx; fi
   if [ -L "$DEST" ]; then rm -f "$DEST"; else rm -rf "$DEST"; fi
   echo "ktc-gui removed (nginx site $SITE and $DEST)."
@@ -50,6 +54,11 @@ if [ "$UNINSTALL" = 1 ]; then
 fi
 
 case "$PORT" in ''|*[!0-9]*) echo "--port must be a number" >&2; exit 2 ;; esac
+case "$FW_UPSTREAM" in
+  127.0.0.1:*[!0-9]*|127.0.0.1:) echo "SC_FIRMWARE_UPSTREAM must be 127.0.0.1:port" >&2; exit 2 ;;
+  127.0.0.1:[0-9]*) ;;
+  *) echo "SC_FIRMWARE_UPSTREAM must be 127.0.0.1:port" >&2; exit 2 ;;
+esac
 [ -f "$SRC/index.html" ] || { echo "run this from the ktc-filament/gui folder" >&2; exit 1; }
 
 # 1. files (dev/ tools and screenshots stay out)
@@ -137,6 +146,15 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Scheme \$scheme;
     }
+    # Firmware helper on loopback. The GUI is the only client (same origin).
+    location /firmware/ {
+        proxy_pass http://$FW_UPSTREAM;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
 }
 NGINX
 if site_exists "$AVAIL"; then sudo cp -p "$AVAIL" "$AVAIL.bak"; fi
@@ -149,7 +167,34 @@ if ! sudo nginx -t; then
   exit 1
 fi
 sudo systemctl reload nginx
+# Let the printer user stop and start Klipper for a flash, and nothing else.
+# visudo checks the line before it is installed. A failure here does not
+# undo the nginx site; the helper then says which command to allow.
+install_sudoers() {
+  local sys tmp
+  sys=$(command -v systemctl || true)
+  [ -n "$sys" ] || { echo "systemctl not found; Klipper stop/start sudoers rule was not installed."; return 0; }
+  case "$sys" in
+    /*) ;;
+    *) echo "systemctl is not an absolute path; sudoers rule was not installed."; return 0 ;;
+  esac
+  tmp=$(mktemp)
+  printf '%s ALL=(root) NOPASSWD: %s stop klipper, %s start klipper, %s is-active klipper\n' \
+    "$(id -un)" "$sys" "$sys" "$sys" > "$tmp"
+  if command -v visudo >/dev/null 2>&1; then
+    if ! sudo visudo -cf "$tmp" >/dev/null; then
+      rm -f "$tmp"
+      echo "Warning: sudoers check failed. Flashing needs: sudo -n systemctl stop klipper (and start)."
+      return 0
+    fi
+  fi
+  sudo install -m 440 "$tmp" /etc/sudoers.d/stealthchanger-firmware
+  rm -f "$tmp"
+  echo "Allowed $(id -un) to stop and start Klipper for flashing (those systemctl commands only)."
+}
+install_sudoers || echo "Warning: could not install the Klipper stop/start sudoers rule."
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo
 echo "ktc-gui is running: http://${IP:-<printer-ip>}:$PORT/"
+echo "Firmware updates: /firmware/ on that port proxies to $FW_UPSTREAM (the helper)."
 echo "Mainsail is unchanged on its usual port."

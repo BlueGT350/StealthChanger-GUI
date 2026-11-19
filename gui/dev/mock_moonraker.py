@@ -36,6 +36,7 @@ GUI = os.path.dirname(HERE)
 ROOT = os.path.dirname(GUI)
 sys.path.insert(0, os.path.join(ROOT, 'tests'))
 import klipper_harness as kh            # noqa: E402
+import aiohttp                            # noqa: E402
 from aiohttp import web, WSMsgType      # noqa: E402
 
 # Demo spools: one of every state the GUI draws
@@ -662,8 +663,8 @@ class Sim:
         # what Moonraker's git_repo updater reports (synthetic hashes)
         return {'name': 'stealthchanger-gui', 'configured_type': 'git_repo', 'detected_type': 'git_repo',
                 'channel': 'stable', 'branch': 'main', 'remote_alias': 'origin', 'owner': '?',
-                'repo_name': 'StealthChanger-GUI', 'version': 'v0.2.8', 'remote_version': 'v0.2.8',
-                'rollback_version': 'v0.2.6', 'full_version_string': 'v0.2.8-0-g0123abcd',
+                'repo_name': 'StealthChanger-GUI', 'version': 'v0.2.12', 'remote_version': 'v0.2.12',
+                'rollback_version': 'v0.2.11', 'full_version_string': 'v0.2.12-0-g0123abcd',
                 'current_hash': '0123abcd0123abcd0123abcd0123abcd0123abcd',
                 'remote_hash': '0123abcd0123abcd0123abcd0123abcd0123abcd',
                 'is_dirty': False, 'detached': False, 'commits_behind': [], 'commits_behind_count': 0,
@@ -900,6 +901,32 @@ def make_app(sim):
                     print('tick error %r' % e, flush=True)
         app['ticker'] = asyncio.ensure_future(run())
 
+    async def firmware_proxy(request):
+        # Same path the nginx site proxies, so the Firmware tab works against
+        # the dev server. The helper binds to loopback only. Any failure here
+        # is "helper not running": the page must not see a 500.
+        offline = {'ok': False, 'error': 'Firmware helper is not running. Run setup.sh on the printer.'}
+        try:
+            port = os.environ.get('SC_FIRMWARE_PORT', '7140')
+            tail = request.match_info.get('path', '')
+            dest = 'http://127.0.0.1:%s/firmware/%s' % (port, tail)
+            if request.rel_url.query_string:
+                dest += '?' + request.rel_url.query_string
+            timeout = aiohttp.ClientTimeout(total=None, sock_connect=1.5)
+            data = await request.read()
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                headers = {}
+                ctype = request.headers.get('Content-Type')
+                if ctype:
+                    headers['Content-Type'] = ctype
+                async with session.request(request.method, dest, data=data or None, headers=headers) as resp:
+                    body = await resp.read()
+                    ct = resp.headers.get('Content-Type', 'application/octet-stream')
+                    return web.Response(status=resp.status, body=body, headers={'Content-Type': ct, 'Cache-Control': 'no-store'})
+        except Exception as exc:
+            sys.stderr.write('firmware proxy: %s\n' % exc.__class__.__name__)
+            return web.json_response(offline, status=502)
+
     app = web.Application()
     app.on_startup.append(ticker)
     app.router.add_get('/websocket', ws_handler)
@@ -909,6 +936,9 @@ def make_app(sim):
     app.router.add_get('/server/files/config/{path:.+}', config_file)
     app.router.add_post('/mock/release', mock_release)
     app.router.add_post('/mock/notify', mock_notify)
+    app.router.add_route('GET', '/firmware/{path:.*}', firmware_proxy)
+    app.router.add_route('POST', '/firmware/{path:.*}', firmware_proxy)
+    app.router.add_route('PUT', '/firmware/{path:.*}', firmware_proxy)
     app.router.add_get('/{path:.*}', static)
     return app
 

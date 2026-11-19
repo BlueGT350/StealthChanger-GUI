@@ -122,7 +122,7 @@ port: 7125
 type: git_repo
 channel: stable
 path: ~/StealthChanger-GUI
-origin: git@github-stealthchanger:BlueGT350/StealthChanger-GUI.git
+origin: git@github.com:BlueGT350/StealthChanger-GUI.git
 primary_branch: main
 is_system_service: False
 managed_services: klipper

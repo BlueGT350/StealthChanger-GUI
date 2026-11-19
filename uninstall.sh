@@ -16,9 +16,12 @@
 #     (the SAVE_CONFIG #*# block is copied back byte for byte)
 #  3. removes the [update_manager stealthchanger-gui] section from moonraker.conf
 #  4. runs gui/install.sh --uninstall (nginx site ktc-gui and ~/ktc-gui)
-#  5. removes the ~/printer_data/config/ktc-filament symlink only
-#  6. leaves the git clone unless --purge is given
-#  7. if something changed, firmware-restarts Klipper and restarts Moonraker
+#  5. removes the firmware helper user service and the build directory
+#     printer_data/stealthchanger-firmware-build. Menuconfig files in
+#     printer_data/config/stealthchanger-firmware stay unless --purge
+#  6. removes the ~/printer_data/config/ktc-filament symlink only
+#  7. leaves the git clone unless --purge is given
+#  8. if something changed, firmware-restarts Klipper and restarts Moonraker
 #
 # The deploy key (~/.ssh/stealthchanger_gui_deploy) is left in place.
 # [include ktc-filament-overrides.cfg] is left in place; that file is only
@@ -45,6 +48,10 @@ Reverses setup.sh and gui/install.sh. Safe to run twice.
 With a terminal and without --yes, it asks before restarting. With no
 terminal and without --yes, it does not restart. A run that changes nothing
 does not restart.
+
+The firmware helper service is removed, and so is the build directory
+printer_data/stealthchanger-firmware-build. Menuconfig files under
+printer_data/config/stealthchanger-firmware stay unless --purge is given.
 EOF
 }
 
@@ -254,6 +261,49 @@ gui_uninstall() {
   bash "$INSTALL_SH" --uninstall
 }
 
+remove_firmware_helper() {
+  local unit="$HOME/.config/systemd/user/stealthchanger-firmware.service"
+  local fw="$CONFIG/stealthchanger-firmware"
+  local build="$DATA/stealthchanger-firmware-build"
+  if [ -f "$unit" ]; then
+    note_change
+    if [ "$DRY" = 1 ]; then
+      info "would disable and remove $unit"
+    else
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user disable --now stealthchanger-firmware.service >/dev/null 2>&1 || true
+      fi
+      rm -f "$unit"
+      info "removed $unit"
+    fi
+  else
+    info "no firmware helper unit"
+  fi
+  if [ "$PURGE" = 1 ] && [ -e "$fw" ]; then
+    note_change
+    if [ "$DRY" = 1 ]; then info "would remove $fw"
+    else rm -rf "$fw"; info "removed $fw"; fi
+  elif [ -e "$fw" ]; then
+    if [ "$DRY" = 1 ]; then info "would keep $fw (pass --purge to remove the menuconfig files and board labels)"
+    else info "keeping $fw (pass --purge to remove the menuconfig files and board labels)"; fi
+  fi
+  # Build output is generated. It is not the menuconfig the user imported.
+  if [ -z "${DATA:-}" ]; then
+    info "printer data directory is unknown; build directory left in place"
+  elif [ -e "$build" ] || [ -L "$build" ]; then
+    note_change
+    if [ "$DRY" = 1 ]; then
+      info "would remove $build"
+    elif [ -L "$build" ]; then
+      rm "$build"
+      info "removed build-dir symlink $build"
+    else
+      rm -rf "$build"
+      info "removed $build"
+    fi
+  fi
+}
+
 remove_symlink() {
   local link="$LINK"
   if [ -L "$link" ]; then
@@ -416,6 +466,7 @@ main() {
   [ -f "$PRINTER_CFG" ] && backup "$PRINTER_CFG"
   [ -f "$MOONRAKER_CONF" ] && backup "$MOONRAKER_CONF"
   [ -f "$CONFIG/ktc-filament-orbiter.cfg" ] && backup "$CONFIG/ktc-filament-orbiter.cfg"
+  [ -d "$CONFIG/stealthchanger-firmware" ] && backup "$CONFIG/stealthchanger-firmware"
   if [ -d "$CONFIG" ] || [ -f "$PRINTER_CFG" ]; then
     vars=$(list_variables) || die "could not list variables files"
     while IFS= read -r f; do
@@ -433,6 +484,9 @@ main() {
 
   say "4. GUI web page (nginx and ~/ktc-gui)"
   gui_uninstall
+
+  say "4b. Firmware helper"
+  remove_firmware_helper
 
   say "5. ktc-filament symlink"
   remove_symlink

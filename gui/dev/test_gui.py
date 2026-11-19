@@ -108,7 +108,7 @@ def run(a):
         gv0 = page.evaluate('window.KTC.app.GUI_VERSION')
         html = open(os.path.join(HERE, '..', 'index.html')).read()
         vs = set(re.findall(r'\?v=([0-9.]+)"', html)) | set(re.findall(r'name="ktc-gui-version" content="([^"]+)"', html))
-        check('index.html ?v= and version tag match GUI_VERSION', vs == {gv0} and len(re.findall(r'\?v=[0-9.]+"', html)) == 5, (vs, gv0))
+        check('index.html ?v= and version tag match GUI_VERSION', vs == {gv0} and len(re.findall(r'\?v=[0-9.]+"', html)) == 6, (vs, gv0))
         check('six columns', page.locator('.col').count() == 6)
         check('module chips', page.locator('#modChips').inner_text().count('v0.2.0') == 3, page.locator('#modChips').inner_text())
         check('filament tab', page.locator('#tabs [data-tab=fil]').count() == 1)

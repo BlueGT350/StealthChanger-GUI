@@ -1,4 +1,4 @@
-# ktc-gui: StealthChanger web GUI (rev 2, v0.2.8)
+# ktc-gui: StealthChanger web GUI (rev 2, v0.2.12)
 
 Install and updates: see the repo [README](../README.md) (`setup.sh`, Update Manager). Fix list and status: [FIXLIST.md](FIXLIST.md).
 
@@ -124,6 +124,16 @@ another printer, use `http://<gui-host>:8090/?host=<printer-ip>:7125`, or change
     each tool gets a spool picker, *Edit spool* and *Add spool* (new filament
     and vendor included). It all goes through Moonraker's Spoolman proxy, so no
     browser tab opens. The used length also shows on each spool in the rack.
+  - *Firmware:* MCU list from the Klipper config, with names (Main Board, T0,
+    T1, or your own label). A board behind the host Klipper version is marked
+    Firmware update required. Create or Edit opens menuconfig in the page;
+    Import still takes an existing `.config`. Flash one board, or Flash all
+    of the boards that are behind. A `canbus_uuid` defaults to Katapult over
+    CAN. A `/dev/serial/by-id` serial defaults to Katapult over USB when
+    Katapult is installed, otherwise direct `make flash` (STM32 DFU or RP2040
+    boot, from `CONFIG_MCU`). Refuses while printing or paused. Menuconfig
+    files and labels live in `~/printer_data/config/stealthchanger-firmware/`
+    and are not part of this repo.
 - **Console strip:** the last console lines and a G-code input.
 - **Settings (gear icon):** Moonraker host; per tool: toolhead art, panel
   colour, accent colour (ducts and grille), and the LED mapping; *apply to all*
