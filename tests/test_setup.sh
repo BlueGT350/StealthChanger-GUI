@@ -120,8 +120,10 @@ OUT=$(env HOME="$H" PATH="$T/bin:$PATH" SC_TEST_ORIGIN="$T/bare.git" KTC_NGINX_D
   bash "$REPO/setup.sh" --no-restart --origin https://example.com/private.git </dev/null 2>&1)
 RC=$?
 ok "--origin rewrites the existing section" '[ $RC -eq 0 ] && grep -q "^origin: https://example.com/private.git$" "$H/printer_data/config/moonraker.conf"'
+ok "--origin sets the git remote too" '[ "$(git -C "$H/StealthChanger-GUI" remote get-url origin)" = https://example.com/private.git ]'
+echo dirty >> "$H/StealthChanger-GUI/README.md"
 run FAKE_SUDO=nopasswd
-ok "a later run without --origin leaves that origin" 'grep -q "^origin: https://example.com/private.git$" "$H/printer_data/config/moonraker.conf"'
+ok "a later run without --origin leaves that origin" 'grep -q "^origin: https://example.com/private.git$" "$H/printer_data/config/moonraker.conf" && [ "$(git -C "$H/StealthChanger-GUI" remote get-url origin)" = https://example.com/private.git ]'
 mkhome j
 git clone -q "$T/bare.git" "$H/StealthChanger-GUI"
 echo dirty >> "$H/StealthChanger-GUI/README.md"
@@ -129,8 +131,34 @@ OUT=$(env HOME="$H" PATH="$T/bin:$PATH" KTC_NGINX_DIR="$H/nginx" \
   SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
   bash "$REPO/setup.sh" --no-restart </dev/null 2>&1)
 RC=$?
-ok "default origin is the public HTTPS repo" '[ $RC -eq 0 ] && grep -q "^origin: https://github.com/BlueGT350/StealthChanger-GUI.git$" "$H/printer_data/config/moonraker.conf"'
+ok "an existing origin is kept and used for moonraker" '[ $RC -eq 0 ] && [ "$(git -C "$H/StealthChanger-GUI" remote get-url origin)" = "$T/bare.git" ] && grep -q "^origin: $T/bare.git$" "$H/printer_data/config/moonraker.conf"'
 ok "dirty clone was not fetched from GitHub" 'grep -q "local edits" <<<"$OUT"'
+ok "the public origin was not written over the existing remote" '! grep -q "origin: https://github.com/BlueGT350/StealthChanger-GUI.git" "$H/printer_data/config/moonraker.conf"'
+
+echo "9b. keep a fork remote, --origin replaces it, no origin uses the public repo"
+mkhome fork
+git clone -q "$T/bare.git" "$H/StealthChanger-GUI"
+git -C "$H/StealthChanger-GUI" remote set-url origin https://example.com/fork.git
+echo dirty >> "$H/StealthChanger-GUI/README.md"
+printf '\n[update_manager stealthchanger-gui]\ntype: git_repo\norigin: https://example.com/fork.git\nprimary_branch: main\n' >> "$H/printer_data/config/moonraker.conf"
+run FAKE_SUDO=nopasswd
+ok "setup keeps the fork remote" '[ "$(git -C "$H/StealthChanger-GUI" remote get-url origin)" = https://example.com/fork.git ]'
+ok "a matching moonraker origin is not rewritten" '[ ! -f "$H/printer_data/config/moonraker.conf.origin-bak" ] && grep -q "^origin: https://example.com/fork.git$" "$H/printer_data/config/moonraker.conf"'
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" SC_TEST_ORIGIN="$T/bare.git" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --no-restart --origin https://example.com/other.git </dev/null 2>&1)
+RC=$?
+ok "--origin replaces the git remote and moonraker origin" '[ $RC -eq 0 ] && [ "$(git -C "$H/StealthChanger-GUI" remote get-url origin)" = https://example.com/other.git ] && grep -q "^origin: https://example.com/other.git$" "$H/printer_data/config/moonraker.conf"'
+mkhome fresh
+git clone -q "$T/bare.git" "$H/StealthChanger-GUI"
+echo dirty >> "$H/StealthChanger-GUI/README.md"
+git -C "$H/StealthChanger-GUI" remote remove origin
+OUT=$(env HOME="$H" PATH="$T/bin:$PATH" KTC_NGINX_DIR="$H/nginx" \
+  SC_MOONRAKER_URL=http://127.0.0.1:9 SC_NO_SUDO_PROMPT=1 FAKE_SUDO=nopasswd \
+  bash "$REPO/setup.sh" --no-restart </dev/null 2>&1)
+RC=$?
+ok "a checkout with no origin uses the public repo" '[ $RC -eq 0 ] && [ "$(git -C "$H/StealthChanger-GUI" config --get remote.origin.url)" = https://github.com/BlueGT350/StealthChanger-GUI.git ] && grep -q "^origin: https://github.com/BlueGT350/StealthChanger-GUI.git$" "$H/printer_data/config/moonraker.conf"'
+ok "help text describes --origin and an existing remote" 'bash "$REPO/setup.sh" --help | grep -q "existing origin remote is kept"'
 
 echo "10. --orbiter / --no-orbiter"
 mkhome k

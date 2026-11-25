@@ -3,7 +3,7 @@
  * Flow: connect -> identify -> printer.info -> detect modules -> subscribe -> render on diffs. */
 (function (KTC) {
   'use strict';
-  var GUI_VERSION = '0.2.12';
+  var GUI_VERSION = '0.2.14';
   /* #brandLogo in index.html is the Voron Design header mark.
      Future hook: follow Mainsail's selected logo by swapping that SVG.
      Not implemented; data-logo stays "voron". */

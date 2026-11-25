@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.14
+
+- Flashing a board that is already on the host Klipper version succeeds. The log says it was reflashed with that same version. A reconnect that stays on a different version is still an error. A host version with `-dirty` on the end matches the same commit without that suffix.
+- The Firmware tab leaves a gap between the Host Klipper and print_stats pills and the Refresh / Flash All buttons.
+
+## v0.2.13
+
+- The Firmware tab no longer shows the paragraph about where menuconfig files and board names are stored.
+- A board whose firmware is newer than the host Klipper version shows **Firmware Ahead**. **Firmware update required** and **Up to date** are unchanged.
+- **Flash All** still updates only boards that are behind, and now says so in its tooltip. Boards that share a menuconfig (comments and blank lines ignored) are built once; that binary is reused. A different menuconfig is built on its own. A progress bar shows the board and the step (Building, Reusing build, Uploading, Verifying, Done, or Failed) while a flash is running.
+- `setup.sh` keeps an existing git origin unless you pass `--origin`. That remote is what `[update_manager stealthchanger-gui]` uses. A new install with no origin still uses the public repo. An origin line that already matches is left as it is.
+
 ## v0.2.12
 
 - Each board on the Firmware tab is in its own card, with that board's name, status, and buttons inside it.

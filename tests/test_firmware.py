@@ -118,17 +118,26 @@ class Runner(object):
         self.make_bin = 'make'
         self.fail_when = None
         self.build_listings = []
+        self.hold_build = None
+        self.held = threading.Event()
+        self.emit_progress = False
 
     def run(self, argv, on_line=None):
         if not isinstance(argv, list) or any(not isinstance(a, str) for a in argv):
             raise AssertionError('argv must be a list of strings: %r' % (argv,))
         self.calls.append(list(argv))
+        if argv and argv[0] == self.make_bin and 'flash' not in argv and self.hold_build is not None and not self.held.is_set():
+            self.held.set()
+            self.hold_build.wait(10)
         if self.fail_when and self.fail_when(argv):
             if on_line:
                 on_line('mock failed')
             return 1, 'fail'
         if on_line:
             on_line('mock ' + os.path.basename(argv[0]))
+            if self.emit_progress and '-f' in argv:
+                # dfu-util style, the shape scripts/flash_usb.py's tool prints.
+                on_line('Download\t[====================]  40%         4096 bytes')
         if '-r' in argv and '-d' in argv:
             device = argv[argv.index('-d') + 1]
             base = os.path.basename(device)
@@ -327,7 +336,7 @@ def test_status_and_guess_refusal():
         check('host version and mismatch',
               desc['host_version'] == HOST and by['mcu']['version'] == OLD and by['mcu']['version_mismatch'] is True
               and by['mcu']['update_state'] == 'behind' and by['mcu']['label'] == 'Main Board')
-        check('helper reports its own version', desc['version'] == fw.HELPER_VERSION == '0.2.12')
+        check('helper reports its own version', desc['version'] == fw.HELPER_VERSION == '0.2.14')
         check('can method is Katapult CAN, interface defaults to can0',
               by['toolhead']['method'] == 'katapult_can' and by['toolhead']['canbus_interface'] == 'can0'
               and by['toolhead']['canbus_interface_default'] is True
@@ -479,6 +488,25 @@ def test_can_usb_direct():
         w.close()
 
 
+def _pin_mcu_after_start(w, versions):
+    """After Klipper start, report these MCU versions instead of copying the host.
+
+    The mock start handler writes the host version onto every MCU. A same-version
+    check needs the board to come back on a chosen string.
+    """
+    real = getattr(w.runner, '_unpinned_run', None) or w.runner.run
+    w.runner._unpinned_run = real
+
+    def run(argv, on_line=None):
+        code, out = real(argv, on_line)
+        if len(argv) >= 2 and argv[-2] == 'start' and argv[-1] == 'klipper':
+            for key, ver in versions.items():
+                w.state.versions[key] = ver
+        return code, out
+
+    w.runner.run = run
+
+
 def test_version_unchanged():
     print('version did not change')
     w = World()
@@ -486,13 +514,52 @@ def test_version_unchanged():
         w.save('toolhead', STM32_CONFIG)
         w.state.versions['toolhead'] = HOST  # already the host version; start keeps it
         logs = []
+        result = w.svc.flash({'mcu': 'toolhead', 'confirm': True}, logs.append)
+        text = '\n'.join(logs)
+        same = 'LOG toolhead was reflashed with the same version (%s), which matches host Klipper' % HOST
+        check('unchanged version that matches the host succeeds',
+              result == {'version': HOST, 'host': HOST, 'mismatch': False}
+              and same in text and 'DONE mcu=toolhead version=%s host=%s mismatch=0' % (HOST, HOST) in text,
+              (result, text))
+        check('same-version success does not emit the verify recovery message',
+              not any(l.startswith('RECOVERY') for l in logs), logs)
+        joined = '\n'.join(' '.join(c) for c in w.runner.calls)
+        check('Klipper was started', joined.count('start klipper') >= 1)
+
+        clean = 'v0.14.0-1-g7558e8c2'
+        dirty = clean + '-dirty'
+        check('versions_match strips -dirty',
+              fw.versions_match(dirty, clean) is True and fw.versions_match(clean, dirty) is True
+              and fw.versions_match(dirty, HOST) is False)
+        w.runner.calls.clear()
+        w.state.host = dirty
+        w.state.versions['toolhead'] = clean
+        _pin_mcu_after_start(w, {'toolhead': clean})
+        logs = []
+        result = w.svc.flash({'mcu': 'toolhead', 'confirm': True}, logs.append)
+        text = '\n'.join(logs)
+        same = 'LOG toolhead was reflashed with the same version (%s), which matches host Klipper' % clean
+        check('unchanged MCU matches a -dirty host version',
+              result == {'version': clean, 'host': dirty, 'mismatch': False}
+              and same in text and 'DONE mcu=toolhead version=%s host=%s mismatch=0' % (clean, dirty) in text
+              and not any(l.startswith('RECOVERY') for l in logs),
+              (result, text))
+
+        w.runner.calls.clear()
+        w.state.host = HOST
+        w.state.versions['toolhead'] = OLD
+        _pin_mcu_after_start(w, {'toolhead': OLD})
+        logs = []
         try:
             w.svc.flash({'mcu': 'toolhead', 'confirm': True}, logs.append)
-            check('unchanged version fails', False)
+            check('unchanged version that does not match the host fails', False)
         except fw.ApiError as exc:
-            check('unchanged version is an error', 'did not change' in exc.message, exc.message)
+            check('unchanged version that does not match the host fails',
+                  'did not change' in exc.message and OLD in exc.message, exc.message)
         check('recovery mentions the MCU not coming back on new firmware',
-              any(l.startswith('RECOVERY') and 'did not come back' in l for l in logs), logs)
+              any(l.startswith('RECOVERY') and 'did not come back' in l for l in logs)
+              and not any('was reflashed with the same version' in l for l in logs)
+              and not any(l.startswith('DONE') for l in logs), logs)
         joined = '\n'.join(' '.join(c) for c in w.runner.calls)
         check('Klipper was started again', joined.count('start klipper') >= 1)
     finally:
@@ -779,7 +846,11 @@ def test_flash_all():
         check('Klipper stopped once and started once', sudo == [['stop', 'klipper'], ['start', 'klipper']], sudo)
         stop_at = next(i for i, c in enumerate(w.runner.calls) if c[0] == 'sudo')
         makes = [c for c in w.runner.calls[:stop_at] if c[0] == 'make']
-        check('both boards build before Klipper stops', len(makes) == 2, makes)
+        check('identical menuconfigs build once before Klipper stops', len(makes) == 1, makes)
+        check('the second board reuses that build', 'reusing build for mcu' in text, text)
+        flashed = [c[c.index('-f') + 1] for c in w.runner.calls if '-f' in c]
+        check('both boards are flashed from the same binary',
+              len(flashed) == 2 and flashed[0] == flashed[1] and '/shared/' in flashed[0], flashed)
         check('log names each board', 'toolhead' in text and '--- ' in text and 'LOG flashed mcu' in text, text)
         check('ebb was not flashed', 'LOG flashed ebb' not in text and 'DONE mcu=ebb' not in text)
         check('whitelist held', argv_ok(w.runner.calls, w.flashtool))
@@ -788,7 +859,7 @@ def test_flash_all():
         w.state.versions['toolhead'] = OLD
         w.state.versions['mcu'] = OLD
         w.plant(USB_MAIN)
-        w.runner.fail_when = lambda argv: any(a.endswith(os.path.join('mcu', 'klipper.bin')) for a in argv)
+        w.runner.fail_when = lambda argv: '-f' in argv and sum('-f' in c for c in w.runner.calls) >= 2
         logs = []
         try:
             w.svc.flash_all({'confirm': True}, logs.append)
@@ -1278,6 +1349,238 @@ def test_source_and_bind():
         check('refuses non-loopback bind', '127.0.0.1' in str(exc), exc)
 
 
+AHEAD = 'v0.13.0-200-gabc1234'
+
+
+def _out_arg(argv):
+    for arg in argv:
+        if arg.startswith('OUT='):
+            return arg.split('=', 1)[1]
+    return None
+
+
+def _kconfig_arg(argv):
+    for arg in argv:
+        if arg.startswith('KCONFIG_CONFIG='):
+            return arg.split('=', 1)[1]
+    return None
+
+
+class MakeHybrid(object):
+    """Real make for Klipper-style builds. sudo and flashtool stay on the mock."""
+
+    def __init__(self, mock):
+        self.mock = mock
+        self.real = fw.RealRunner()
+
+    def run(self, argv, on_line=None):
+        if argv and argv[0] == 'make':
+            self.mock.calls.append(list(argv))
+            return self.real.run(argv, on_line=on_line)
+        return self.mock.run(argv, on_line=on_line)
+
+
+# Klipper's Makefile assigns OUT and KCONFIG_CONFIG in the file. A command-line
+# value overrides both. Recipes join $(OUT) onto the filename, so a missing
+# slash would write <dir>klipper.bin. `make flash` flashes $(OUT)klipper.bin.
+MINI_KCONFIG_MAKEFILE = (
+    "OUT=out/\n"
+    "export KCONFIG_CONFIG := $(CURDIR)/.config\n"
+    "\n"
+    ".PHONY: all flash\n"
+    "all: $(OUT)klipper.bin\n"
+    "\n"
+    "$(OUT)klipper.bin: $(KCONFIG_CONFIG)\n"
+    "\tmkdir -p $(dir $@)\n"
+    "\tcp $(KCONFIG_CONFIG) $@\n"
+    "\n"
+    "flash: $(OUT)klipper.bin\n"
+    "\t@echo \"  Flashing $< to $(FLASH_DEVICE)\"\n"
+    "\t@test -n \"$(FLASH_DEVICE)\"\n"
+    "\t@test -f $(OUT)klipper.bin\n"
+)
+
+
+def test_reuse_skips_ahead_and_reports_progress():
+    print('build reuse, ahead skip, progress')
+    commented = '\n# another comment\n\n' + STM32_CONFIG + '\n\n# tail\n'
+    check('config hash ignores comments and blank lines',
+          fw.config_content_hash(STM32_CONFIG) == fw.config_content_hash(commented)
+          and fw.config_content_hash(STM32_CONFIG) != fw.config_content_hash(RP2040_CONFIG))
+    check('upload percent from dfu-util and from katapult hash marks',
+          fw.upload_percent('Download\t[========                     ]  32%         4096 bytes') == 32
+          and fw.upload_percent('##########') == 20
+          and fw.upload_percent('Flashing \'/tmp/klipper.bin\'...') is None
+          and fw.upload_percent('block 3 of 10') == 30)
+
+    w = World()
+    try:
+        w.save('toolhead', STM32_CONFIG)
+        w.save('mcu', commented)
+        w.save('ebb', RP2040_CONFIG)
+        w.state.versions['toolhead'] = AHEAD
+        w.state.versions['ebb'] = HOST
+        w.state.versions['mcu'] = OLD
+        w.plant(USB_MAIN)
+        w.runner.calls.clear()
+        w.runner.emit_progress = True
+        logs = []
+        result = w.svc.flash_all({'confirm': True}, logs.append)
+        text = '\n'.join(logs)
+        check('Flash All skips ahead, current, and unknown', result['mcus'] == ['mcu'], result['mcus'])
+        check('an ahead board was not built or flashed', 'toolhead' not in text and 'ebb' not in text, text)
+        stages = [row['stage'] for row in w.svc._progress_trace]
+        check('status stages cover build, upload, verify, and done',
+              stages[0] == 'building' and 'uploading' in stages and 'verifying' in stages and stages[-1] == 'done',
+              stages)
+        uploading = [row for row in w.svc._progress_trace if row['stage'] == 'uploading']
+        check('upload percent is taken from the flash tool line',
+              any(row['percent'] == 40 for row in uploading) and uploading[-1]['board_total'] == 1, uploading)
+        check('job is cleared when the flash finishes', w.svc.describe()['job'] is None)
+        makes = [c for c in w.runner.calls if c[0] == 'make' and 'flash' not in c]
+        check('the one behind board was built in its shared directory',
+              len(makes) == 1 and '/shared/' in (_out_arg(makes[0]) or ''), makes)
+    finally:
+        w.close()
+
+    w = World()
+    try:
+        w.save('toolhead', STM32_CONFIG)
+        w.save('mcu', RP2040_CONFIG, 'direct')
+        w.plant(USB_MAIN)
+        w.state.versions['toolhead'] = OLD
+        w.state.versions['mcu'] = OLD
+        w.runner.calls.clear()
+        logs = []
+        result = w.svc.flash_all({'confirm': True}, logs.append)
+        stop_at = next(i for i, c in enumerate(w.runner.calls) if c[0] == 'sudo')
+        makes = [c for c in w.runner.calls[:stop_at] if c[0] == 'make']
+        outs = [_out_arg(c) for c in makes]
+        check('different menuconfigs are separate builds',
+              result['mcus'] == ['toolhead', 'mcu'] and len(makes) == 2
+              and len(set(outs)) == 2 and all(o and o.endswith('/') and '/shared/' in o for o in outs), outs)
+        flashed = [c[c.index('-f') + 1] for c in w.runner.calls if '-f' in c]
+        mcu_flash = [c for c in w.runner.calls if c[0] == 'make' and 'flash' in c]
+        check('each board is flashed from its own build',
+              len(flashed) == 1 and flashed[0].startswith(outs[0].rstrip('/'))
+              and len(mcu_flash) == 1 and _out_arg(mcu_flash[0]) == outs[1]
+              and _kconfig_arg(mcu_flash[0]).endswith('mcu.config'),
+              (flashed, mcu_flash))
+        w.runner.calls.clear()
+        w.state.versions['toolhead'] = OLD
+        w.logs_of('toolhead')
+        single = [c for c in w.runner.calls if c[0] == 'make' and 'flash' not in c]
+        check('single-board flash does not use the shared directory',
+              len(single) == 1 and _out_arg(single[0]) == os.path.join(w.build, 'toolhead') + '/', single)
+    finally:
+        w.close()
+
+    w = World()
+    try:
+        w.save('toolhead', STM32_CONFIG)
+        w.save('mcu', STM32_CONFIG)
+        w.plant(USB_MAIN)
+        w.runner.hold_build = threading.Event()
+        fw.Handler.service = w.svc
+        httpd = start_server(fw.Handler)
+        errors = []
+
+        def go():
+            try:
+                w.svc.flash_all({'confirm': True}, lambda line: None)
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=go)
+        thread.start()
+        try:
+            held = w.runner.held.wait(5)
+            code, body = http_json(httpd.server_address[1], 'GET', '/firmware/v1/status')
+            job = json.loads(body).get('job') or {}
+            check('status reports the in-progress build',
+                  held and code == 200 and job.get('stage') == 'building'
+                  and job.get('action') == 'flash_all' and job.get('board_index') == 1
+                  and job.get('board_total') == 2 and job.get('percent') is None
+                  and job.get('mcu') == 'toolhead', (held, code, job))
+        finally:
+            w.runner.hold_build.set()
+            thread.join(10)
+            httpd.shutdown()
+        check('held flash finished', not errors and not thread.is_alive(), errors)
+    finally:
+        w.close()
+
+
+def test_real_make_reuses_one_out_dir():
+    print('real make KCONFIG_CONFIG / OUT')
+    if not shutil.which('make'):
+        check('make is on PATH', False)
+        return
+    w = World()
+    try:
+        with open(os.path.join(w.klipper, 'Makefile'), 'w', encoding='utf-8') as fh:
+            fh.write(MINI_KCONFIG_MAKEFILE)
+        commented = '# note\n\n' + STM32_CONFIG + '\n'
+        w.save('toolhead', RP2040_CONFIG)
+        w.save('ebb', STM32_CONFIG, 'direct')
+        w.save('mcu', commented, 'direct')
+        digest = fw.config_content_hash(STM32_CONFIG)
+        other = fw.config_content_hash(RP2040_CONFIG)
+        stale = os.path.join(w.build, 'shared', digest, 'stale-autoconf.h')
+        os.makedirs(os.path.dirname(stale), exist_ok=True)
+        with open(stale, 'w', encoding='utf-8') as fh:
+            fh.write('stale')
+        kept = os.path.join(w.build, 'mcu', 'keep')
+        os.makedirs(os.path.dirname(kept), exist_ok=True)
+        with open(kept, 'w', encoding='utf-8') as fh:
+            fh.write('keep')
+        w.plant(USB_EBB)
+        w.plant(USB_MAIN)
+        w.state.versions['toolhead'] = OLD
+        w.state.versions['ebb'] = OLD
+        w.state.versions['mcu'] = OLD
+        w.runner.calls.clear()
+        w.svc.runner = MakeHybrid(w.runner)
+        logs = []
+        result = w.svc.flash_all({'confirm': True}, logs.append)
+        text = '\n'.join(logs)
+        stop_at = next(i for i, c in enumerate(w.runner.calls) if c[0] == 'sudo')
+        builds = [c for c in w.runner.calls[:stop_at] if c[0] == 'make']
+        outs = [_out_arg(c) for c in builds]
+        check('real make built once per distinct config',
+              result['mcus'] == ['toolhead', 'ebb', 'mcu'] and len(builds) == 2 and 'reusing build for mcu' in text,
+              (result['mcus'], outs, text))
+        check('each build OUT is an isolated shared directory ending in /',
+              all(o and o.endswith('/') and o.rstrip('/').endswith(h) for o, h in zip(outs, (other, digest))), outs)
+        stm_bin = os.path.join(outs[1], 'klipper.bin')
+        rp_bin = os.path.join(outs[0], 'klipper.bin')
+        check('make wrote klipper.bin inside OUT and wiped the stale file',
+              os.path.isfile(stm_bin) and os.path.isfile(rp_bin)
+              and not os.path.isfile(stale) and os.path.isfile(kept)
+              and open(stm_bin, encoding='utf-8').read() == open(os.path.join(w.fwdir, 'ebb.config'), encoding='utf-8').read())
+        flashes = [c for c in w.runner.calls if c[0] == 'make' and 'flash' in c]
+        check('make flash reuses that OUT and the config it was built with',
+              len(flashes) == 2
+              and _out_arg(flashes[0]) == outs[1] and _out_arg(flashes[1]) == outs[1]
+              and _kconfig_arg(flashes[0]).endswith(os.path.join('stealthchanger-firmware', 'ebb.config'))
+              and _kconfig_arg(flashes[1]) == _kconfig_arg(flashes[0])
+              and any('FLASH_DEVICE=' in a and os.path.basename(USB_EBB) in a for a in flashes[0])
+              and any('FLASH_DEVICE=' in a and os.path.basename(USB_MAIN) in a for a in flashes[1]),
+              flashes)
+        tool_fw = [c[c.index('-f') + 1] for c in w.runner.calls if '-f' in c]
+        check('katapult is given the binary from that config, not the other one',
+              len(tool_fw) == 1 and os.path.dirname(tool_fw[0]) == os.path.realpath(outs[0])
+              and os.path.dirname(tool_fw[0]) != os.path.realpath(outs[1]), tool_fw)
+        try:
+            w.svc._assert_firmware(outs[1], os.path.join(outs[1], 'klipper.bin'), other)
+            check('a binary from another menuconfig is refused', False)
+        except fw.ApiError as exc:
+            check('a binary from another menuconfig is refused',
+                  exc.status == 500 and 'different menuconfig' in exc.message, exc.message)
+    finally:
+        w.close()
+
+
 def main():
     test_parse_and_refuse_escape()
     test_status_and_guess_refusal()
@@ -1287,6 +1590,8 @@ def main():
     test_version_unchanged()
     test_includes_and_labels()
     test_flash_all()
+    test_reuse_skips_ahead_and_reports_progress()
+    test_real_make_reuses_one_out_dir()
     test_kconfig_form()
     test_http_whitelist()
     test_build_dir_is_cleaned()

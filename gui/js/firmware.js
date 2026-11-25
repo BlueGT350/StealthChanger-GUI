@@ -10,6 +10,29 @@
   var logEl = null;
   var rootEl = null;
   var HELPER_VERSION_WARN = 'Firmware helper is out of date \u2013 it will restart automatically, or run setup.sh';
+  var FLASH_ALL_TITLE = 'Bring all boards that are behind up to the installed Klipper version';
+  var keepProgress = false;
+  var lastProgress = null;
+  var STAGE_TEXT = {
+    building: 'Building',
+    reusing: 'Reusing build',
+    stopping: 'Stopping Klipper',
+    uploading: 'Uploading',
+    starting: 'Starting Klipper',
+    verifying: 'Verifying',
+    done: 'Done',
+    failed: 'Failed'
+  };
+  var STAGE_POS = {
+    building: 0.12,
+    reusing: 0.22,
+    stopping: 0.32,
+    uploading: 0.55,
+    starting: 0.78,
+    verifying: 0.9,
+    done: 1,
+    failed: 1
+  };
 
   function el(tag, attrs, kids) { return hooks.el(tag, attrs, kids); }
 
@@ -70,6 +93,8 @@
   }
 
   function refresh() {
+    var keep = keepProgress;
+    keepProgress = false;
     return request('GET', '/firmware/v1/status').then(function (r) {
       if (!r.json || r.json.ok !== true) {
         last = null;
@@ -78,6 +103,8 @@
       }
       last = r.json;
       paint();
+      if (last.job) paintProgress(last.job);
+      else if (!keep) hideProgress();
     }, function () {
       last = null;
       paintOffline('Firmware helper is not running. On the printer, run setup.sh again so this page can reach /firmware/.');
@@ -150,7 +177,7 @@
       var n = behindBoards().length;
       var allWhy = why || (!last ? 'Firmware helper is not running.' : (n ? '' : 'No board is behind the host Klipper version with a saved .config.'));
       allBtn.disabled = !!(allWhy || busy);
-      allBtn.title = allWhy || ('Flash ' + n + ' board' + (n === 1 ? '' : 's') + ' that are behind. Stops Klipper once, then starts it at the end.');
+      allBtn.title = allWhy || FLASH_ALL_TITLE;
     }
   }
 
@@ -191,8 +218,73 @@
       return el('span', { class: 'badge req', text: 'Firmware update required',
         title: 'This MCU firmware is behind the host Klipper version' });
     }
-    return el('span', { class: 'badge ok', text: 'Up to date',
-      title: 'This MCU firmware is not behind the host Klipper version' });
+    if (m.update_state === 'ahead') {
+      return el('span', { class: 'badge ahead', text: 'Firmware Ahead' });
+    }
+    if (m.update_state === 'current') {
+      return el('span', { class: 'badge ok', text: 'Up to date',
+        title: 'This MCU firmware matches the host Klipper version' });
+    }
+    return null;
+  }
+
+  function progressFraction(job) {
+    var total = job.board_total || 1;
+    var index = job.board_index || 1;
+    if (index < 1) index = 1;
+    if (index > total) index = total;
+    var pos = STAGE_POS[job.stage];
+    if (pos == null) pos = 0.05;
+    if (job.stage === 'uploading' && job.percent != null && !isNaN(Number(job.percent))) {
+      var p = Math.max(0, Math.min(100, Number(job.percent)));
+      pos = 0.32 + 0.46 * (p / 100);
+    }
+    if (job.action === 'flash_all') return ((index - 1) + pos) / total;
+    return pos;
+  }
+
+  function progressTitle(job) {
+    var name = job.label || job.mcu || '';
+    if (job.action === 'flash_all') {
+      var title = 'Board ' + (job.board_index || 1) + ' of ' + (job.board_total || 1);
+      if (name) title += ' \u00b7 ' + name;
+      return title;
+    }
+    return name || 'Flashing';
+  }
+
+  function hideProgress() {
+    lastProgress = null;
+    var box = rootEl && rootEl.querySelector('[data-fw="progress"]');
+    if (!box) return;
+    box.hidden = true;
+    box.className = 'fwprogress';
+  }
+
+  function paintProgress(job) {
+    if (!rootEl || !job) return;
+    lastProgress = job;
+    var box = rootEl.querySelector('[data-fw="progress"]');
+    var titleEl = rootEl.querySelector('[data-fw="progress-title"]');
+    var stageEl = rootEl.querySelector('[data-fw="progress-stage"]');
+    var track = rootEl.querySelector('[data-fw="progress-track"]');
+    var bar = rootEl.querySelector('[data-fw="progress-bar"]');
+    if (!box || !titleEl || !stageEl || !track || !bar) return;
+    box.hidden = false;
+    box.className = 'fwprogress' + (job.stage === 'failed' ? ' failed' : job.stage === 'done' ? ' done' : '');
+    var title = progressTitle(job);
+    var stage = STAGE_TEXT[job.stage] || job.stage || '';
+    if (job.stage === 'uploading' && job.percent != null && !isNaN(Number(job.percent))) {
+      stage += ' ' + Math.round(Number(job.percent)) + '%';
+    }
+    titleEl.textContent = title;
+    stageEl.textContent = stage;
+    var pct = Math.max(0, Math.min(100, Math.round(progressFraction(job) * 100)));
+    bar.style.width = pct + '%';
+    var moving = job.percent == null && job.stage !== 'done' && job.stage !== 'failed';
+    track.className = 'fwprogress-track' + (moving ? ' indeterminate' : '');
+    track.setAttribute('aria-valuenow', String(pct));
+    track.setAttribute('aria-valuetext', title + (stage ? ', ' + stage : ''));
   }
 
   function mcuCard(m) {
@@ -416,7 +508,9 @@
     busy = true;
     paint();
     push('LOG starting flash of ' + (m.label || m.name));
-    streamPost('/firmware/v1/flash', { mcu: m.name, confirm: true });
+    streamPost('/firmware/v1/flash', { mcu: m.name, confirm: true }, {
+      action: 'flash', mcu: m.name, label: m.label || m.name, board_index: 1, board_total: 1
+    });
   }
 
   function commitLabel(m, input) {
@@ -441,10 +535,10 @@
     var list = behindBoards();
     if (!list.length) { hooks.toast('No board is behind the host Klipper version with a saved .config.'); return; }
     hooks.confirmDlg(
-      'Flash all boards that are behind?',
-      'This builds each board, stops Klipper once, flashes them in order, and starts Klipper at the end. It stops on the first failure and starts Klipper again. The print state is checked before each board.',
+      'Flash All boards that are behind?',
+      'This builds each menuconfig once, reuses that build for boards with the same .config, stops Klipper once, flashes the boards that are behind, and starts Klipper at the end. It stops on the first failure and starts Klipper again. The print state is checked before each board.',
       list.map(function (m) { return (m.label || m.name) + ' — ' + methodLabel(m); }),
-      'Flash all',
+      'Flash All',
       'Cancel'
     ).then(function (ok) {
       if (!ok) return;
@@ -458,11 +552,33 @@
     busy = true;
     paint();
     push('LOG starting flash of every board that is behind');
-    streamPost('/firmware/v1/flash_all', { confirm: true });
+    var n = behindBoards().length;
+    streamPost('/firmware/v1/flash_all', { confirm: true }, {
+      action: 'flash_all', board_index: 1, board_total: n || 1
+    });
   }
 
-  function streamPost(path, payload) {
+  function streamPost(path, payload, seed) {
     var buf = '';
+    var poll = null;
+    function stopPoll() {
+      if (poll) { clearInterval(poll); poll = null; }
+    }
+    function pullStatus() {
+      return request('GET', '/firmware/v1/status').then(function (r) {
+        if (r.json && r.json.ok === true && r.json.job) paintProgress(r.json.job);
+      }, function () { /* the stream still carries the log */ });
+    }
+    var initial = {
+      action: path.indexOf('flash_all') >= 0 ? 'flash_all' : 'flash',
+      stage: 'building', board_index: 1, board_total: 1, percent: null, label: '', mcu: ''
+    };
+    if (seed) Object.keys(seed).forEach(function (key) {
+      if (seed[key] != null) initial[key] = seed[key];
+    });
+    paintProgress(initial);
+    pullStatus();
+    poll = setInterval(pullStatus, 400);
     function take(chunk) {
       buf += chunk;
       var parts = buf.split('\n');
@@ -499,7 +615,20 @@
       push('FAIL ' + (e && e.message ? e.message : e));
       push('RECOVERY If Klipper is not running, start it with: sudo systemctl start klipper. Your menuconfig file was not changed.');
     }).then(function () {
+      stopPoll();
+      var failed = lines.some(function (line) { return line.indexOf('FAIL ') === 0; });
+      var prev = lastProgress || seed || {};
+      keepProgress = true;
       busy = false;
+      paintProgress({
+        action: prev.action || (path.indexOf('flash_all') >= 0 ? 'flash_all' : 'flash'),
+        stage: failed ? 'failed' : 'done',
+        board_index: failed ? (prev.board_index || 1) : (prev.board_total || prev.board_index || 1),
+        board_total: prev.board_total || 1,
+        label: prev.label || '',
+        mcu: prev.mcu || '',
+        percent: failed ? null : 100
+      });
       refresh();
     });
   }
@@ -778,17 +907,23 @@
       el('div', { class: 'fwtop', 'data-fw': 'host' }),
       el('div', { class: 'fwhelper-warn', 'data-fw': 'helper-version', hidden: true }),
       el('div', { class: 'banner bad', 'data-fw': 'lock', hidden: true }),
-      el('div', { class: 'muted small note', text:
-        'Menuconfig for each MCU is stored in printer_data/config/stealthchanger-firmware/ and is not part of this git repo, so an update does not replace it. ' +
-        'Build files go in printer_data/stealthchanger-firmware-build/, outside the config folder. ' +
-        'Create or Edit writes that file from Klipper\'s Kconfig and does not flash. The chip comes only from CONFIG_MCU. ' +
-        'A canbus_uuid defaults to Katapult over CAN. A /dev/serial/by-id serial defaults to Katapult over USB when Katapult is installed, and to direct USB otherwise. ' +
-        'Board names are saved in labels.json in that same folder.' }),
+      el('div', { class: 'fwprogress', 'data-fw': 'progress', hidden: true }, [
+        el('div', { class: 'fwprogress-meta' }, [
+          el('span', { 'data-fw': 'progress-title', text: '' }),
+          el('span', { class: 'fwprogress-stage', 'data-fw': 'progress-stage', text: '' })
+        ]),
+        el('div', {
+          class: 'fwprogress-track', 'data-fw': 'progress-track', role: 'progressbar',
+          'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0'
+        }, [
+          el('div', { class: 'fwprogress-bar', 'data-fw': 'progress-bar' })
+        ])
+      ]),
       el('div', { class: 'btns' }, [
         el('button', { type: 'button', class: 'btn', text: 'Refresh', title: 'Read MCUs, versions, and saved configs again',
           onclick: function () { refresh(); } }),
-        el('button', { type: 'button', class: 'btn danger', text: 'Flash all', 'data-fw': 'flashall', disabled: true,
-          title: 'Flash every board that is behind the host version and has a .config',
+        el('button', { type: 'button', class: 'btn danger', text: 'Flash All', 'data-fw': 'flashall', disabled: true,
+          title: FLASH_ALL_TITLE,
           onclick: function () { confirmFlashAll(); } })
       ])
     ]));

@@ -302,6 +302,8 @@ table.utab td.acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: cent
 .cfbox li { overflow-wrap: anywhere; }
 .fwtop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .fwtop h4 { margin: 0; }
+/* Host Klipper / print_stats pills, then Refresh and Flash All. 10px matches the board-card button row. */
+.grp > .fwtop { margin-bottom: 10px; }
 .fwname { min-width: 8em; }
 .fwlabel { width: 11em; max-width: 100%; }
 /* One card per board, same surface as the other cards (border, radius, background). */
@@ -319,7 +321,27 @@ table.utab td.acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: cent
 .fwhelper-warn { margin: 8px 0; padding: 6px 10px; border-radius: 6px; border-left: 4px solid var(--amber);
   background: #2a2410; color: #ffe9a8; font-size: 12px; line-height: 1.35; }
 .badge.req { color: #ffe082; border-color: #8d6e00; background: #2e2700; font-weight: 650; }
+.badge.ahead { color: #ffe082; border-color: var(--amber); background: #2e2700; font-weight: 650; }
 .badge.ok { color: #c8e6c9; border-color: #2e7d32; background: #1b2e1c; font-weight: 650; }
+.fwprogress { width: 100%; min-width: 0; margin: 8px 0 2px; }
+.fwprogress-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px;
+  align-items: baseline; margin-bottom: 6px; font-size: 12px; line-height: 1.35; }
+.fwprogress-meta span { min-width: 0; overflow-wrap: anywhere; }
+.fwprogress-stage { color: var(--amber); font-weight: 650; }
+.fwprogress-track { position: relative; height: 8px; width: 100%; overflow: hidden;
+  background: #141414; border: 1px solid #3d3d3d; border-radius: 99px; }
+.fwprogress-bar { height: 100%; width: 0; border-radius: 99px;
+  background: linear-gradient(90deg, #8d6e00, var(--amber)); transition: width .25s ease; }
+.fwprogress.done .fwprogress-bar { background: var(--green); }
+.fwprogress.failed .fwprogress-bar { background: var(--red); }
+.fwprogress.failed .fwprogress-stage { color: #ff8a80; }
+.fwprogress-track.indeterminate::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 179, 0, .55), transparent);
+  animation: fwprogress-slide 1.15s ease-in-out infinite; }
+@keyframes fwprogress-slide { from { transform: translateX(-130%); } to { transform: translateX(320%); } }
+@media (prefers-reduced-motion: reduce) {
+  .fwprogress-track.indeterminate::after { animation: none; opacity: .7; }
+}
 .fwcfg .fwfields { overflow: auto; max-height: min(60vh, 520px); margin: 8px 0; padding-right: 4px; }
 .fwcfg .fwmenu { margin: 8px 0; padding: 4px 0 4px 10px; border-left: 2px solid var(--line); }
 .fwcfg .fwmenu-title { margin: 0 0 6px; font-size: 14px; }
@@ -377,6 +399,7 @@ table.utab td.acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: cent
   .fwboard .fwlabel { width: 100%; }
   .fwboard .fwstatus { justify-content: flex-start; margin-left: 0; }
   .fwboard .btns .btn { flex: 1 1 auto; }
+  .fwprogress-meta { flex-direction: column; align-items: flex-start; gap: 2px; }
 }
 @media (max-width: 400px) {
   .brand { font-size: 13px; }

@@ -28,13 +28,18 @@ Flash methods. A saved choice wins. Otherwise:
 
 Menuconfig files and board labels live in
 ~/printer_data/config/stealthchanger-firmware/ and are never written by a
-git update. Build output lives in
-~/printer_data/stealthchanger-firmware-build/<mcu>/, outside the Mainsail
-config folder. The chip is never guessed: with no .config, or no CONFIG_MCU,
-flashing is refused. The in-browser form writes the .config through
-Klipper's kconfiglib and does not flash. Create can preselect the
-architecture, processor, and communication interface from the MCU Klipper
-is already talking to.
+git update. A single-board flash builds in
+~/printer_data/stealthchanger-firmware-build/<mcu>/. Flash All builds once
+per distinct menuconfig, in .../shared/<sha256>/, and reuses that binary.
+OUT always ends with a slash. The chip is never guessed: with no .config,
+or no CONFIG_MCU, flashing is refused. The in-browser form writes the
+.config through Klipper's kconfiglib and does not flash. Create can
+preselect the architecture, processor, and communication interface from
+the MCU Klipper is already talking to.
+
+GET /firmware/v1/status includes "job" while a flash is running:
+action, mcu, label, stage, board_index, board_total, and percent
+(null when the flash tool has not printed a percentage).
 
 Moonraker updates the git clone but cannot restart this user service, so a
 running helper would keep the old code. At startup the process fingerprints
@@ -63,7 +68,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import kconfig_menu
 
-HELPER_VERSION = '0.2.12'
+HELPER_VERSION = '0.2.14'
 # How often the running process compares its code to the startup fingerprint.
 # Short enough that an update is picked up before the next flash, long enough
 # that the check is not a busy loop. Before-action checks cover the gap.
@@ -377,6 +382,55 @@ def version_relation(host, mcu):
     return 'behind'
 
 
+def config_content_hash(text):
+    """SHA-256 of a Kconfig .config, ignoring comment lines and blank lines.
+
+    Kconfig writes CONFIG_ lines and '#' comments (including
+    '# CONFIG_FOO is not set'). Comments and blank lines do not change the
+    firmware make builds, so Flash All treats those files as one config.
+    """
+    if not isinstance(text, str):
+        text = ''
+    kept = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        kept.append(stripped)
+    payload = ('\n'.join(kept) + ('\n' if kept else '')).encode('utf-8')
+    return hashlib.sha256(payload).hexdigest()
+
+
+# dfu-util and scripts/flash_usb.py print "32%". Some tools print "3 of 40".
+# Katapult's flashtool.py does not print a number: output("#") once per 2%.
+_PERCENT_RE = re.compile(r'(?<!\d)(\d{1,3})\s*%')
+_OF_RE = re.compile(r'(?i)\b(\d+)\s+of\s+(\d+)\b')
+
+
+def upload_percent(line):
+    """Upload percent from one flash-tool line, or None if it has none."""
+    if not isinstance(line, str):
+        return None
+    text = line.replace('\r', ' ').strip()
+    if not text:
+        return None
+    marks = text.replace('[', '').replace(']', '').strip()
+    if marks and set(marks) <= set('#'):
+        return min(100, marks.count('#') * 2)
+    match = _PERCENT_RE.search(text)
+    if match:
+        val = int(match.group(1))
+        if 0 <= val <= 100:
+            return val
+        return None
+    match = _OF_RE.search(text)
+    if match:
+        num, den = int(match.group(1)), int(match.group(2))
+        if den > 0 and 0 <= num <= den:
+            return int(round(100.0 * num / float(den)))
+    return None
+
+
 def friendly_label(name, tool_nums):
     """Automatic board name. A saved label replaces this."""
     if name == 'mcu':
@@ -672,6 +726,7 @@ class FirmwareService(object):
         self.verify_pause = float(verify_pause if verify_pause is not None else os.environ.get('SC_VERIFY_PAUSE', '1'))
         self._lock = threading.Lock()
         self._job = None
+        self._progress_trace = []
         # Code the process actually loaded. A later Moonraker update changes
         # the files under this directory; the running interpreter does not.
         self._firmware_dir = os.path.abspath(
@@ -721,6 +776,35 @@ class FirmwareService(object):
             if self._job:
                 raise ApiError(409, 'A firmware job is already running for %s.' % self._job.get('mcu'))
             self._job = job
+            self._progress_trace.append(self._job_snapshot())
+
+    def _job_snapshot(self):
+        job = self._job or {}
+        return {
+            'action': job.get('action'),
+            'mcu': job.get('mcu'),
+            'label': job.get('label'),
+            'stage': job.get('stage'),
+            'board_index': job.get('board_index'),
+            'board_total': job.get('board_total'),
+            'percent': job.get('percent'),
+        }
+
+    def _update_job(self, **fields):
+        with self._lock:
+            if not self._job:
+                return
+            self._job.update(fields)
+            self._progress_trace.append(self._job_snapshot())
+            if len(self._progress_trace) > 400:
+                del self._progress_trace[:200]
+
+    def _note_upload_percent(self, pct):
+        with self._lock:
+            job = self._job
+            if not job or job.get('stage') != 'uploading' or job.get('percent') == pct:
+                return
+        self._update_job(percent=pct)
 
     def _end_job(self):
         with self._lock:
@@ -1342,10 +1426,20 @@ class FirmwareService(object):
         return self._kconfig_form(data, write=True)
 
     # ----- flash -----
+    def _observe_tool_line(self, line, log):
+        pct = upload_percent(line)
+        text = line.strip() if isinstance(line, str) else ''
+        marks = text.replace('[', '').replace(']', '').strip()
+        # Katapult prints a bar of '#' and nothing else. Keep that out of the log.
+        if not (marks and set(marks) <= set('#')):
+            log('LOG ' + (line if isinstance(line, str) else ''))
+        if pct is not None:
+            self._note_upload_percent(pct)
+
     def _run(self, argv, log, label):
         log('LOG ' + label)
         log('LOG $ ' + ' '.join(argv))
-        code, _out = self.runner.run(argv, on_line=lambda line: log('LOG ' + line))
+        code, _out = self.runner.run(argv, on_line=lambda line: self._observe_tool_line(line, log))
         if code != 0:
             raise ApiError(500, '%s failed (exit %s).' % (label, code))
         return code
@@ -1358,16 +1452,16 @@ class FirmwareService(object):
         code, out = self.runner.run(argv, on_line=lambda line: log('LOG ' + line))
         return code, out
 
-    def _board_out(self, name, clean):
-        """This board's build directory, always with a trailing slash.
+    def _prepare_out_dir(self, raw, clean):
+        """A build directory inside the firmware build folder, with a trailing slash.
 
-        Klipper's Makefile compiles $(OUT)src/sched.o. Without the slash that
-        becomes <board>src/sched.o and the build cannot find autoconf.h.
-        clean wipes just this board so a previous .config cannot linger.
+        Klipper's Makefile compiles $(OUT)src/sched.o and joins $(OUT) onto
+        klipper.bin. Without the slash that becomes <dir>src/sched.o.
+        Command-line OUT= overrides the Makefile's OUT=out/. clean wipes
+        only this directory so a previous .config cannot linger in it.
         """
-        name = safe_name(name)
         os.makedirs(self.build_dir, exist_ok=True)
-        raw = os.path.join(self.build_dir, name)
+        raw = os.path.abspath(raw)
         if not inside(self.build_dir, raw):
             raise ApiError(500, 'refusing to use a build directory outside the firmware build folder.')
         if clean:
@@ -1383,9 +1477,22 @@ class FirmwareService(object):
         if not inside(self.build_dir, raw):
             raise ApiError(500, 'refusing to use a build directory outside the firmware build folder.')
         path = os.path.realpath(raw) if os.path.isdir(raw) else raw
+        if not inside(self.build_dir, path):
+            raise ApiError(500, 'refusing to use a build directory outside the firmware build folder.')
         if not path.endswith('/'):
             path += '/'
         return path
+
+    def _board_out(self, name, clean):
+        """This board's own build directory. Single-board flash uses this."""
+        name = safe_name(name)
+        return self._prepare_out_dir(os.path.join(self.build_dir, name), clean)
+
+    def _shared_out(self, digest, clean):
+        """One directory per menuconfig hash. Flash All never shares this across hashes."""
+        if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+            raise ApiError(500, 'internal error: bad config hash')
+        return self._prepare_out_dir(os.path.join(self.build_dir, 'shared', digest), clean)
 
     def _out_dir(self, name):
         return self._board_out(name, clean=False)
@@ -1396,12 +1503,78 @@ class FirmwareService(object):
             raise ApiError(400, 'Saved .config is missing for %s.' % name)
         return path
 
-    def _build(self, name, log):
-        out = self._board_out(name, clean=True)
-        cfg = self._config_path(name)
+    def _config_hash(self, name):
+        path = self._config_path(name)
+        with open(path, encoding='utf-8') as fh:
+            return config_content_hash(fh.read()), path
+
+    def _stamp_path(self, out):
+        return os.path.join(out, 'stealthchanger-config.sha256')
+
+    def _write_stamp(self, out, digest):
+        path = self._stamp_path(out)
+        tmp = path + '.tmp'
+        if not inside(self.build_dir, path) or not inside(self.build_dir, tmp):
+            raise ApiError(500, 'refusing to write a build stamp outside the firmware build folder.')
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            fh.write(digest + '\n')
+        os.replace(tmp, path)
+
+    def _read_stamp(self, out):
+        try:
+            with open(self._stamp_path(out), encoding='utf-8') as fh:
+                return fh.read().strip()
+        except OSError:
+            return None
+
+    def _assert_firmware(self, out, fw, digest):
+        """The binary about to be flashed was built from this menuconfig."""
+        out_root = os.path.realpath(out)
+        fw_real = os.path.realpath(fw)
+        if not inside(self.build_dir, out_root) or not inside(self.build_dir, fw_real):
+            raise ApiError(500, 'firmware file is outside the build directory. Nothing was flashed.')
+        if os.path.dirname(fw_real) != out_root or not os.path.isfile(fw_real):
+            raise ApiError(
+                500,
+                'Firmware file is not the binary from this menuconfig build. Nothing was flashed.')
+        if self._read_stamp(out) != digest:
+            raise ApiError(
+                500,
+                'Refusing to flash a binary built from a different menuconfig. Nothing was flashed.')
+
+    def _make_build(self, config_path, out, log, label):
+        """Klipper's build: make -C <klipper> KCONFIG_CONFIG= OUT=<dir/> -j4.
+
+        OUT ends with /. KCONFIG_CONFIG is the file that was hashed. make's
+        command line overrides the Makefile's OUT=out/ and KCONFIG_CONFIG.
+        """
         argv = [self.make_bin, '-C', self.klipper_dir,
-                'KCONFIG_CONFIG=' + cfg, 'OUT=' + out, '-j4']
-        self._run(argv, log, 'build Klipper for %s' % name)
+                'KCONFIG_CONFIG=' + config_path, 'OUT=' + out, '-j4']
+        self._run(argv, log, label)
+
+    def _build(self, name, log):
+        """Build this board alone, in its own directory. Flash All does not call this."""
+        out = self._board_out(name, clean=True)
+        digest, cfg = self._config_hash(name)
+        self._make_build(cfg, out, log, 'build Klipper for %s' % name)
+        self._write_stamp(out, digest)
+        return out
+
+    def _build_shared(self, digest, config_path, log, label):
+        """Build this menuconfig in an isolated directory, then stamp it.
+
+        The directory is wiped first. A later board is flashed from this
+        directory only when its .config hashes to the same digest.
+        """
+        file_hash = config_content_hash(open(config_path, encoding='utf-8').read())
+        if file_hash != digest:
+            raise ApiError(500, 'The menuconfig does not match this build. Nothing was flashed.')
+        out = self._shared_out(digest, clean=True)
+        self._make_build(config_path, out, log, label)
+        self._firmware_file(out)
+        if config_content_hash(open(config_path, encoding='utf-8').read()) != digest:
+            raise ApiError(500, 'The menuconfig changed during the build. Nothing was flashed.')
+        self._write_stamp(out, digest)
         return out
 
     def _firmware_file(self, out):
@@ -1515,7 +1688,7 @@ class FirmwareService(object):
         log('LOG Katapult device: ' + target + (' (bootloader was requested)' if requested else ''))
         self._flashtool(['-d', target, '-f', fw], log, 'flash Katapult over USB')
 
-    def _flash_direct(self, desc, name, log):
+    def _flash_direct(self, desc, name, log, out=None, config_path=None):
         serial = desc['serial']
         kind, line = direct_kind(desc.get('config_mcu'))
         if not kind or not line:
@@ -1527,8 +1700,14 @@ class FirmwareService(object):
         if not self._usable_device(device):
             raise ApiError(400, 'serial path failed validation. Nothing was flashed.')
         log('LOG ' + line)
-        out = self._out_dir(name)
-        cfg = self._config_path(name)
+        # make flash uses the OUT and KCONFIG_CONFIG of the build. Klipper's
+        # flash target depends on $(OUT)klipper.bin (or klipper.uf2). Passing
+        # that same OUT and the same config file avoids a rebuild, and it
+        # cannot pick up a binary from a different menuconfig.
+        out = out or self._out_dir(name)
+        cfg = config_path or self._config_path(name)
+        if not out.endswith('/'):
+            out += '/'
         argv = [self.make_bin, '-C', self.klipper_dir, 'flash',
                 'FLASH_DEVICE=' + device, 'KCONFIG_CONFIG=' + cfg, 'OUT=' + out]
         self._run(argv, log, 'direct USB flash (%s)' % kind)
@@ -1543,10 +1722,17 @@ class FirmwareService(object):
             if last:
                 changed = before is None or last != before
                 match = versions_match(host, last)
+                # Same version is success when it matches the host (including a
+                # host string that only differs by a trailing -dirty). A
+                # reconnect that stays on some other version is still a failure,
+                # and that raise is what makes flash() log RECOVERY_VERIFY.
                 if not changed:
-                    raise ApiError(
-                        500,
-                        'The MCU reconnected but the firmware version did not change (still %s).' % last)
+                    if match is True:
+                        log('LOG %s was reflashed with the same version (%s), which matches host Klipper' % (name, last))
+                    else:
+                        raise ApiError(
+                            500,
+                            'The MCU reconnected but the firmware version did not change (still %s).' % last)
                 if match is False:
                     log('LOG version mismatch: MCU %s, host Klipper %s' % (last, host))
                 log('DONE mcu=%s version=%s host=%s mismatch=%s' % (
@@ -1578,15 +1764,25 @@ class FirmwareService(object):
             raise ApiError(404, 'No [mcu] section named %s.' % name)
         if not desc['flashable']:
             raise ApiError(400, desc['block_reason'] or 'This MCU cannot be flashed.')
-        self._begin_job({'mcu': name, 'action': 'flash'})
+        label = desc.get('label') or name
+        self._begin_job({
+            'action': 'flash',
+            'mcu': name,
+            'label': label,
+            'stage': 'building',
+            'board_index': 1,
+            'board_total': 1,
+            'percent': None,
+        })
         phase = 'idle'
         before = desc.get('version')
         try:
             log('LOG flash %s via %s' % (name, desc['method']))
-            # Build while Klipper is still running (separate OUT directory).
+            # Build while Klipper is still running (this board's OUT directory).
             # The print-state check below is the last gate before it is stopped.
-            self._build(name, log)
-            fw = self._firmware_file(self._out_dir(name))
+            out = self._build(name, log)
+            fw = self._firmware_file(out)
+            self._update_job(stage='stopping', percent=None)
             self.assert_idle('right before flashing')
             code, _out = self._systemctl('stop', log)
             if code != 0:
@@ -1596,11 +1792,17 @@ class FirmwareService(object):
                     'Allow that command for this user. Nothing was flashed.')
             phase = 'stopped'
             log('LOG Klipper is stopped')
-            self._flash_image(desc, name, fw, log)
+            self._update_job(stage='uploading', percent=None)
+            self._flash_image(desc, name, fw, log, out=out)
+            self._update_job(stage='starting', percent=None)
             self._require_started(log)
             phase = 'started'
-            return self._verify(name, before, log)
+            self._update_job(stage='verifying', percent=None)
+            result = self._verify(name, before, log)
+            self._update_job(stage='done', percent=100)
+            return result
         except Exception:
+            self._update_job(stage='failed', percent=None)
             if phase == 'stopped':
                 log('LOG flashing failed; starting Klipper again')
                 try:
@@ -1616,13 +1818,21 @@ class FirmwareService(object):
         finally:
             self._end_job()
 
-    def _flash_image(self, desc, name, fw, log):
+    def _flash_image(self, desc, name, fw, log, out=None, config_path=None, digest=None):
+        if config_path is None:
+            config_path = self._config_path(name)
+        if digest is None:
+            with open(config_path, encoding='utf-8') as fh:
+                digest = config_content_hash(fh.read())
+        if out is None:
+            out = self._out_dir(name)
+        self._assert_firmware(out, fw, digest)
         if desc['method'] == 'katapult_can':
             self._flash_can(desc, fw, log)
         elif desc['method'] == 'katapult_usb':
             self._flash_usb_katapult(desc, fw, log)
         elif desc['method'] == 'direct':
-            self._flash_direct(desc, name, log)
+            self._flash_direct(desc, name, log, out=out, config_path=config_path)
         else:
             raise ApiError(400, 'Unknown flash method. Nothing was flashed.')
 
@@ -1663,9 +1873,13 @@ class FirmwareService(object):
     def flash_all(self, data, log):
         """Flash every behind MCU that has a .config.
 
-        One confirmation. Print state is checked before each board, before
-        Klipper is stopped. Klipper is stopped once and started once, at the
-        end, or again if a board fails. The first failure stops the batch.
+        One confirmation. Boards whose menuconfig matches (comments and blank
+        lines ignored) are built once, in an isolated OUT directory, and that
+        binary is reused. A different menuconfig is a separate build. Print
+        state is checked before each board, before Klipper is stopped.
+        Klipper is stopped once and started once, at the end, or again if a
+        board fails. The first failure stops the batch. Ahead, current, and
+        unknown boards are not in this list.
         """
         _reject_extra(data, ('confirm',))
         if data.get('confirm') is not True:
@@ -1676,14 +1890,49 @@ class FirmwareService(object):
             raise ApiError(
                 400,
                 'No MCU is behind the host Klipper version with a saved .config. Nothing was flashed.')
-        names = [item['name'] for item in targets]
-        self._begin_job({'mcu': ','.join(names), 'action': 'flash_all'})
+        prepared = []
+        for item in targets:
+            digest, _path = self._config_hash(item['name'])
+            row = dict(item)
+            row['config_hash'] = digest
+            prepared.append(row)
+        names = [item['name'] for item in prepared]
+        total = len(prepared)
+        first = prepared[0]
+        self._begin_job({
+            'action': 'flash_all',
+            'mcu': first['name'],
+            'label': first.get('label') or first['name'],
+            'stage': 'building',
+            'board_index': 1,
+            'board_total': total,
+            'percent': None,
+        })
         phase = 'idle'
+        builds = {}
         try:
-            for item in targets:
-                self.assert_idle('before ' + item['name'])
-                log('LOG --- %s (%s) ---' % (item.get('label') or item['name'], item['name']))
-                self._build(item['name'], log)
+            for index, item in enumerate(prepared, 1):
+                name = item['name']
+                label = item.get('label') or name
+                digest = item['config_hash']
+                stage = 'reusing' if digest in builds else 'building'
+                self._update_job(
+                    stage=stage, mcu=name, label=label,
+                    board_index=index, board_total=total, percent=None)
+                self.assert_idle('before ' + name)
+                log('LOG --- %s (%s) ---' % (label, name))
+                file_hash, cfg = self._config_hash(name)
+                if file_hash != digest:
+                    raise ApiError(
+                        500,
+                        'menuconfig for %s changed before the build. Nothing was flashed.' % name)
+                if digest not in builds:
+                    out = self._build_shared(digest, cfg, log, 'build Klipper for %s' % name)
+                    fw = self._firmware_file(out)
+                    builds[digest] = {'out': out, 'fw': fw, 'config': cfg, 'hash': digest}
+                else:
+                    log('LOG reusing build for %s (same menuconfig)' % name)
+            self._update_job(stage='stopping', percent=None)
             self.assert_idle('right before flashing')
             code, _out = self._systemctl('stop', log)
             if code != 0:
@@ -1693,20 +1942,39 @@ class FirmwareService(object):
                     'Allow that command for this user. Nothing was flashed.')
             phase = 'stopped'
             log('LOG Klipper is stopped')
-            for item in targets:
+            for index, item in enumerate(prepared, 1):
                 self._assert_idle_or_stopped(item['name'], log)
                 name = item['name']
+                label = item.get('label') or name
+                file_hash, _cfg = self._config_hash(name)
+                rec = builds.get(file_hash)
+                if file_hash != item['config_hash'] or rec is None or rec['hash'] != file_hash:
+                    raise ApiError(
+                        500,
+                        'Refusing to flash %s because its menuconfig does not match the build. '
+                        'Nothing further was flashed.' % name)
+                self._update_job(
+                    stage='uploading', mcu=name, label=label,
+                    board_index=index, board_total=total, percent=None)
                 log('LOG flash %s via %s' % (name, item['method']))
-                fw = self._firmware_file(self._out_dir(name))
-                self._flash_image(item, name, fw, log)
+                self._flash_image(
+                    item, name, rec['fw'], log,
+                    out=rec['out'], config_path=rec['config'], digest=file_hash)
                 log('LOG flashed %s' % name)
+            self._update_job(stage='starting', percent=None)
             self._require_started(log)
             phase = 'started'
             results = []
-            for item in targets:
+            for index, item in enumerate(prepared, 1):
+                self._update_job(
+                    stage='verifying', mcu=item['name'],
+                    label=item.get('label') or item['name'],
+                    board_index=index, board_total=total, percent=None)
                 results.append(self._verify(item['name'], item.get('version'), log))
+            self._update_job(stage='done', board_index=total, percent=100)
             return {'mcus': names, 'results': results}
         except Exception:
+            self._update_job(stage='failed', percent=None)
             if phase == 'stopped':
                 log('LOG flashing failed; starting Klipper again')
                 try:

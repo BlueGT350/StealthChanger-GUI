@@ -10,8 +10,8 @@ const appSrc = fs.readFileSync(path.join(ROOT, 'gui', 'js', 'app.js'), 'utf8');
 const helperSrc = fs.readFileSync(path.join(ROOT, 'firmware', 'firmware_helper.py'), 'utf8');
 const css = fs.readFileSync(path.join(ROOT, 'gui', 'style.css'), 'utf8');
 const guiVersion = (appSrc.match(/var GUI_VERSION = '([^']+)'/) || [])[1];
-assert.strictEqual(guiVersion, '0.2.12', 'GUI_VERSION');
-assert.ok(helperSrc.indexOf("HELPER_VERSION = '0.2.12'") >= 0, 'HELPER_VERSION');
+assert.strictEqual(guiVersion, '0.2.14', 'GUI_VERSION');
+assert.ok(helperSrc.indexOf("HELPER_VERSION = '0.2.14'") >= 0, 'HELPER_VERSION');
 
 function Element(tag) {
   this.tag = tag;
@@ -23,9 +23,11 @@ function Element(tag) {
   this.disabled = false;
   this.value = '';
   this.title = '';
+  this.style = {};
   this.parentNode = null;
   this.scrollTop = 0;
   this.scrollHeight = 0;
+  this._listeners = {};
 }
 Element.prototype.setAttribute = function (k, v) {
   this.attrs[k] = String(v);
@@ -45,7 +47,12 @@ Element.prototype.appendChild = function (child) {
   this.children.push(child);
   return child;
 };
-Element.prototype.addEventListener = function () {};
+Element.prototype.addEventListener = function (type, fn) {
+  (this._listeners[type] = this._listeners[type] || []).push(fn);
+};
+Element.prototype.click = function () {
+  (this._listeners.click || []).forEach(function (fn) { fn({}); });
+};
 Object.defineProperty(Element.prototype, 'textContent', {
   get: function () { return this._text; },
   set: function (v) {
@@ -193,7 +200,13 @@ function check(name, cond, detail) {
 }
 
 const pane = document.createElement('div');
-KTC.firmware.build(pane, { el: el, toast: function () {}, printBlock: function () { return null; } });
+const hooks = { el: el, toast: function () {}, printBlock: function () { return null; }, confirmDlg: function () { return Promise.resolve(false); } };
+let confirmArgs = null;
+hooks.confirmDlg = function (title, text, list, yes) {
+  confirmArgs = { title: title, text: text, list: list, yes: yes };
+  return Promise.resolve(false);
+};
+KTC.firmware.build(pane, hooks);
 
 function show(version) {
   statusBody = status(version);
@@ -238,12 +251,88 @@ show('0.2.11').then(function () {
     /\.fwboards\s*\{[^}]*gap:\s*14px/.test(css)
     && /@media \(max-width:\s*700px\)\s*\{[\s\S]*\.fwboard\s+\.fwlabel\s*\{\s*width:\s*100%/.test(css)
     && /\.card\s*\{[^}]*border:\s*1px solid var\(--line\)[^}]*border-radius:\s*8px/.test(css));
+  function allText(node) {
+    var text = node._text || '';
+    (node.children || []).forEach(function (child) { text += ' ' + allText(child); });
+    return text;
+  }
+  check('the menuconfig storage paragraph is gone',
+    allText(pane).indexOf('Menuconfig for each MCU is stored') < 0
+    && allText(pane).indexOf('Board names are saved in labels.json') < 0);
+  const flashAll = pane.querySelector('[data-fw="flashall"]');
+  check('Flash All label and tooltip',
+    flashAll && flashAll.textContent === 'Flash All'
+    && flashAll.title === 'Bring all boards that are behind up to the installed Klipper version',
+    flashAll && [flashAll.textContent, flashAll.title]);
+  check('progress bar is in the tab and hidden until a flash',
+    pane.querySelector('[data-fw="progress"]') && pane.querySelector('[data-fw="progress"]').hidden === true
+    && /\.fwprogress-track\.indeterminate::after[\s\S]*fwprogress-slide/.test(css)
+    && /\.badge\.ahead\s*\{[^}]*var\(--amber\)/.test(css)
+    && /@media \(max-width:\s*700px\)\s*\{[\s\S]*\.fwprogress-meta\s*\{\s*flex-direction:\s*column/.test(css));
+  confirmArgs = null;
+  flashAll.click();
+  check('Flash All confirmation only lists boards that are behind and ready',
+    confirmArgs && confirmArgs.yes === 'Flash All'
+    && confirmArgs.title === 'Flash All boards that are behind?'
+    && confirmArgs.list.length === 1 && confirmArgs.list[0].indexOf('Main Board') === 0, confirmArgs);
   return show(guiVersion);
 }).then(function () {
   const warn = pane.querySelector('[data-fw="helper-version"]');
   check('matching helper version hides the warning', warn && warn.hidden === true && warn.textContent === '',
     warn && [warn.hidden, warn.textContent]);
-  return show('0.2.13');
+  statusBody = status(guiVersion);
+  statusBody.mcus.push(mcu({
+    name: 'toolhead', label: 'Toolhead', label_derived: 'Toolhead', update_state: 'ahead',
+    version: 'v0.13.0-200-gabc', connection: 'can', serial: '', canbus_uuid: 'abcdef012345',
+    method: 'katapult_can', method_choices: ['katapult_can']
+  }));
+  statusBody.mcus.push(mcu({
+    name: 'mystery', label: 'Mystery', update_state: 'unknown', version: '',
+    config_saved: false, flashable: false, block_reason: 'No version'
+  }));
+  return KTC.firmware.onShow().then(function () {
+    const ahead = pane.querySelector('[data-mcu="toolhead"]');
+    const badge = ahead && ahead.querySelector('.badge.ahead');
+    check('Firmware Ahead badge text and colour class',
+      badge && badge.textContent === 'Firmware Ahead' && badge.title === ''
+      && !ahead.querySelector('.badge.ok') && !ahead.querySelector('.badge.req'),
+      badge && [badge.className, badge.textContent, badge.title]);
+    confirmArgs = null;
+    pane.querySelector('[data-fw="flashall"]').click();
+    check('Flash All does not include ahead, current, or unknown boards',
+      confirmArgs && confirmArgs.list.length === 1 && confirmArgs.list[0].indexOf('Main Board') === 0
+      && confirmArgs.list.every(function (line) {
+        return line.indexOf('Toolhead') !== 0 && line.indexOf('T0') !== 0 && line.indexOf('Mystery') !== 0;
+      }), confirmArgs && confirmArgs.list);
+    statusBody.job = {
+      action: 'flash_all', stage: 'uploading', board_index: 2, board_total: 3,
+      label: 'T0', mcu: 'EBB0', percent: 40
+    };
+    return KTC.firmware.onShow();
+  }).then(function () {
+    const box = pane.querySelector('[data-fw="progress"]');
+    const title = pane.querySelector('[data-fw="progress-title"]');
+    const stage = pane.querySelector('[data-fw="progress-stage"]');
+    const track = pane.querySelector('[data-fw="progress-track"]');
+    const bar = pane.querySelector('[data-fw="progress-bar"]');
+    check('progress shows board N of M, the name, and the upload step',
+      box && box.hidden === false && title.textContent === 'Board 2 of 3 \u00b7 T0'
+      && stage.textContent === 'Uploading 40%' && track.className.indexOf('indeterminate') < 0
+      && bar.style.width && bar.style.width !== '0%',
+      title && [title.textContent, stage && stage.textContent, bar && bar.style.width, track && track.className]);
+    statusBody.job = {
+      action: 'flash_all', stage: 'building', board_index: 1, board_total: 3,
+      label: 'Main Board', mcu: 'mcu', percent: null
+    };
+    return KTC.firmware.onShow();
+  }).then(function () {
+    const track = pane.querySelector('[data-fw="progress-track"]');
+    const stage = pane.querySelector('[data-fw="progress-stage"]');
+    check('a long step without a percent keeps moving',
+      stage.textContent === 'Building' && track.className.indexOf('indeterminate') >= 0,
+      stage && [stage.textContent, track && track.className]);
+    return show('0.2.15');
+  });
 }).then(function () {
   const warn = pane.querySelector('[data-fw="helper-version"]');
   check('a newer helper still warns, because the versions differ',

@@ -29,13 +29,13 @@ Resume, initialize, and the other KTC-Easy recovery commands.
 
 ## Firmware
 
-Lists every `[mcu]` with a name (Main Board, T0, T1, or the MCU name). You can rename a board; the name is kept in `~/printer_data/config/stealthchanger-firmware/labels.json`. A board that is behind the host Klipper version is marked **Firmware update required**.
+Lists every `[mcu]` with a name (Main Board, T0, T1, or the MCU name). You can rename a board; the name is kept in `~/printer_data/config/stealthchanger-firmware/labels.json`. A board that is behind the host Klipper version is marked **Firmware update required**. A board whose firmware is newer than the host is marked **Firmware Ahead**.
 
 **Create** or **Edit** opens menuconfig in the page, from `~/klipper`'s Kconfig. **Create** starts from what the connected MCU reports (chip and CAN or USB) when that maps onto the menu. **Copy to…** copies a saved `.config` onto other boards and asks before replacing one. **Import** still takes a `.config` you already have. Those files live in `~/printer_data/config/stealthchanger-firmware/` and an update does not replace them. Build output is `~/printer_data/stealthchanger-firmware-build/<mcu>/`. The chip is whatever `CONFIG_MCU` says. A saved file that names a different chip than the board reports is marked on that row.
 
-A `canbus_uuid` defaults to Katapult over CAN. A `/dev/serial/by-id` serial defaults to Katapult over USB when Katapult is installed, and to direct USB otherwise. **Flash all** updates every board that is behind and already has a `.config`: one confirmation, Klipper stopped once, stopped at the first failure. Flashing is refused while a print is printing or paused.
+A `canbus_uuid` defaults to Katapult over CAN. A `/dev/serial/by-id` serial defaults to Katapult over USB when Katapult is installed, and to direct USB otherwise. **Flash All** updates every board that is behind and already has a `.config` (a newer or current board is left alone): one confirmation, one build per identical menuconfig, Klipper stopped once, stopped at the first failure. A progress bar shows the board and the step while it runs. Flashing one board that already matches the host version succeeds. Flashing is refused while a print is printing or paused.
 
-The page talks to a helper on `127.0.0.1` through `/firmware/` on this site. `setup.sh` installs it. See the changelog for v0.2.12.
+The page talks to a helper on `127.0.0.1` through `/firmware/` on this site. `setup.sh` installs it. See the changelog for v0.2.14.
 
 ## Filament
 

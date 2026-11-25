@@ -14,8 +14,10 @@
 #
 # The clone uses HTTPS. The default origin is
 # https://github.com/BlueGT350/StealthChanger-GUI.git. There is no deploy
-# key. --origin points the clone at another repo, and is the only
-# time an existing [update_manager stealthchanger-gui] origin line is changed.
+# key. --origin URL sets the git remote and the Update Manager origin.
+# Without --origin, an existing origin remote is kept and used for
+# moonraker.conf. A fresh install with no origin uses the public repo.
+# An origin line that already matches that remote is left as it is.
 #
 # Orbiter button pins are written once to
 # ~/printer_data/config/ktc-filament-orbiter.cfg and are not overwritten.
@@ -92,13 +94,15 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-# SC_TEST_ORIGIN clones from a local repo in tests. It is not --origin, so it
-# does not rewrite an existing moonraker.conf origin line.
+# SC_TEST_ORIGIN is the clone URL tests use when nothing is cloned yet.
+# It is not --origin: an existing origin remote is kept.
 if [ -n "${SC_TEST_ORIGIN:-}" ] && [ "$ORIGIN_EXPLICIT" = 0 ]; then
   ORIGIN_ARG=$SC_TEST_ORIGIN
   NONINTERACTIVE=1
 fi
-if [ -n "$ORIGIN_ARG" ]; then
+if [ "$ORIGIN_EXPLICIT" = 1 ]; then
+  ORIGIN=$ORIGIN_ARG
+elif [ -n "$ORIGIN_ARG" ]; then
   ORIGIN=$ORIGIN_ARG
 else
   ORIGIN=$PUBLIC_ORIGIN
@@ -132,7 +136,6 @@ pin_migrate() {  # save Orbiter pins before git fetch can reset them
 
 # ---------------------------------------------------------------- 1. pins, then clone
 say "1. Clone $PUBLIC_ORIGIN"
-info "git origin for this run: $ORIGIN"
 # An old real folder (not yet the symlink) still has the edited pins.
 if [ -d "$LINK/orbiter" ] && [ ! -L "$LINK" ]; then
   pin_migrate "$LINK/orbiter/orbiter_addon.cfg"
@@ -141,11 +144,27 @@ if [ -d "$CLONE/.git" ]; then
   pin_migrate
 fi
 if [ -d "$CLONE/.git" ]; then
-  cur=$(git -C "$CLONE" remote get-url origin 2>/dev/null || true)
-  if [ "$cur" != "$ORIGIN" ]; then
-    git -C "$CLONE" remote set-url origin "$ORIGIN"
-    info "origin was '$cur', set to $ORIGIN"
+  # The URL stored in the repo, not a rewritten insteadOf URL. A rewrite can
+  # embed credentials, and that must not be copied into moonraker.conf.
+  cur=$(git -C "$CLONE" config --get remote.origin.url 2>/dev/null || true)
+  if [ "$ORIGIN_EXPLICIT" = 1 ]; then
+    if [ -z "$cur" ]; then
+      git -C "$CLONE" remote add origin "$ORIGIN"
+      info "set origin to $ORIGIN"
+    elif [ "$cur" != "$ORIGIN" ]; then
+      git -C "$CLONE" remote set-url origin "$ORIGIN"
+      info "origin was '$cur', set to $ORIGIN"
+    fi
+  elif [ -n "$cur" ]; then
+    if [ "$cur" != "$ORIGIN" ]; then
+      info "keeping existing origin $cur"
+    fi
+    ORIGIN=$cur
+  else
+    git -C "$CLONE" remote add origin "$ORIGIN"
+    info "no origin set; using $ORIGIN"
   fi
+  info "git origin for this run: $ORIGIN"
   if [ -n "$(git -C "$CLONE" status --porcelain --untracked-files=no)" ]; then
     info "the clone has local edits; leaving it as is (Moonraker will flag it as dirty)"
   else
@@ -156,6 +175,7 @@ if [ -d "$CLONE/.git" ]; then
     fi
   fi
 else
+  info "git origin for this run: $ORIGIN"
   if [ -e "$CLONE" ]; then
     mkdir -p "$BACKUP" && mv "$CLONE" "$BACKUP/" && info "moved an old $CLONE (not a git clone) to $BACKUP/"
   fi
@@ -368,9 +388,10 @@ install_firmware_helper
 # ---------------------------------------------------------------- 5. moonraker.conf
 say "5. moonraker.conf"
 if grep -qE "^\[update_manager[[:space:]]+$UM_NAME\]" "$MOONRAKER_CONF"; then
-  if [ "$ORIGIN_EXPLICIT" = 1 ]; then
-    cp -a "$MOONRAKER_CONF" "$MOONRAKER_CONF.origin-bak"
-    um_out=$(python3 - "$MOONRAKER_CONF" "$UM_NAME" "$ORIGIN" <<'PY'
+  # Point the section at the git remote (or --origin). Leave the file alone
+  # when the origin line already matches, so a matching line is not rewritten.
+  cp -a "$MOONRAKER_CONF" "$MOONRAKER_CONF.origin-bak"
+  um_out=$(python3 - "$MOONRAKER_CONF" "$UM_NAME" "$ORIGIN" <<'PY'
 import sys
 path, name, origin = sys.argv[1:]
 lines = open(path, encoding="utf-8").read().splitlines(keepends=True)
@@ -405,14 +426,12 @@ else:
     print("SAME")
 PY
 )
-    if [ "$um_out" = UPDATED ]; then
-      info "set [update_manager $UM_NAME] origin to $ORIGIN"
-      MR_CHANGED=1
-    else
-      info "[update_manager $UM_NAME] origin already $ORIGIN"
-    fi
+  if [ "$um_out" = UPDATED ]; then
+    info "set [update_manager $UM_NAME] origin to $ORIGIN"
+    MR_CHANGED=1
   else
-    info "[update_manager $UM_NAME] already there (origin left as it is; pass --origin to change it)"
+    rm -f "$MOONRAKER_CONF.origin-bak"
+    info "[update_manager $UM_NAME] origin already $ORIGIN"
   fi
 else
   backup "$MOONRAKER_CONF"
